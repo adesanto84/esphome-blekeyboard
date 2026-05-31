@@ -2,113 +2,354 @@
 
 #include "ble_keyboard.h"
 #include "esphome/core/log.h"
-#include <NimBLEServer.h>
-#include <NimBLEDevice.h>
-#include <NimBLEService.h>
-#include <NimBLECharacteristic.h>
-#include <NimBLEAdvertising.h>
-#include <string>
-#include <list>
+
+/* NimBLE native headers from ESP-IDF 5.x */
+#include "nimble/nimble_port.h"
+#include "nimble/nimble_port_freertos.h"
+#include "host/ble_hs.h"
+#include "host/ble_uuid.h"
+#include "host/ble_gatt.h"
+#include "host/ble_gap.h"
+#include "services/gatt/ble_svc_gatt.h"
+#include "services/gap/ble_svc_gap.h"
+#include "services/bas/ble_svc_bas.h"
 
 namespace esphome {
 namespace ble_keyboard {
+
 static const char *const TAG = "ble_keyboard";
 
-void Esp32BleKeyboard::setup() {
-  ESP_LOGI(TAG, "Setting up...");
+/* --- HID Report Map for keyboard (boot compatible) --- */
+static const uint8_t kHidReportMap[] = {
+    0x05, 0x01,  0x09, 0x06,  0xA1, 0x01,
+    0x05, 0x07,  0x19, 0xE0,  0x29, 0xE7,  0x15, 0x00,  0x25, 0x01,
+    0x75, 0x01,  0x95, 0x08,  0x81, 0x02,
+    0x95, 0x01,  0x75, 0x08,  0x81, 0x01,
+    0x95, 0x05,  0x75, 0x01,  0x05, 0x08,  0x19, 0x01,  0x29, 0x05,
+    0x91, 0x02,  0x95, 0x01,  0x75, 0x03,  0x91, 0x01,
+    0x95, 0x06,  0x75, 0x08,  0x15, 0x00,  0x25, 0xFF,
+    0x05, 0x07,  0x19, 0x00,  0x29, 0xFF,  0x81, 0x00,
+    0xC0,
+};
 
-  bleKeyboard.begin();
+static uint8_t keyboard_report_[8];
+static uint8_t media_report_[2];
+static uint8_t hid_info_[4] = {0x01, 0x01, 0x00, 0x03};
+static uint8_t protocol_mode_ = 1;
 
-  pServer = BLEDevice::getServer();
+/* --- UUID constants --- */
+static const ble_uuid16_t UUID_HID_SERVICE      = BLE_UUID16_INIT(0x1812);
+static const ble_uuid16_t UUID_HID_INFORMATION  = BLE_UUID16_INIT(0x2A4A);
+static const ble_uuid16_t UUID_HID_CONTROL_PT   = BLE_UUID16_INIT(0x2A4C);
+static const ble_uuid16_t UUID_HID_REPORT_MAP   = BLE_UUID16_INIT(0x2A4B);
+static const ble_uuid16_t UUID_HID_PROTOCOL     = BLE_UUID16_INIT(0x2A4E);
+static const ble_uuid16_t UUID_HID_REPORT       = BLE_UUID16_INIT(0x2A4D);
 
-  pServer->advertiseOnDisconnect(this->reconnect_);
+/* --- shared state --- */
+static bool g_connected = false;
+static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+static uint16_t g_handle_keyboard = 0;
+static uint16_t g_handle_media = 0;
 
-  bleKeyboard.releaseAll();
+/* --- access callback (free function so C GATT tables can reference it) --- */
+static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
+                                struct ble_gatt_access_ctxt *ctxt, void *arg) {
+  uint16_t uuid16 = ble_uuid_u16(ctxt->chr->uuid);
+  int rc = 0;
+
+  switch (uuid16) {
+    case 0x2A4A:
+      rc = os_mbuf_append(ctxt->om, hid_info_, sizeof(hid_info_));
+      break;
+    case 0x2A4C:
+      if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        uint8_t suspend;
+        rc = ble_hs_mbuf_to_flat(ctxt->om, &suspend, 1, NULL);
+        ESP_LOGD(TAG, "HID Control Point: suspend=%d", suspend);
+      }
+      break;
+    case 0x2A4B:
+      rc = os_mbuf_append(ctxt->om, kHidReportMap, sizeof(kHidReportMap));
+      break;
+    case 0x2A4E:
+      if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        rc = os_mbuf_append(ctxt->om, &protocol_mode_, 1);
+      } else if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        rc = ble_hs_mbuf_to_flat(ctxt->om, &protocol_mode_, 1, NULL);
+      }
+      break;
+    case 0x2A4D:
+      if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        if (attr_handle == g_handle_keyboard) {
+          rc = os_mbuf_append(ctxt->om, keyboard_report_, sizeof(keyboard_report_));
+        } else if (attr_handle == g_handle_media) {
+          rc = os_mbuf_append(ctxt->om, media_report_, sizeof(media_report_));
+        }
+      }
+      break;
+    default:
+      rc = BLE_ATT_ERR_UNLIKELY;
+      break;
+  }
+  return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
-void Esp32BleKeyboard::stop() {
-  if (this->reconnect_) {
-    pServer->advertiseOnDisconnect(false);
+/* --- GATT service definition --- */
+static struct ble_gatt_chr_def hid_chrs[] = {
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_INFORMATION,
+    .access_cb =   ble_keyboard_access,
+    .flags =       BLE_GATT_CHR_F_READ,
+  },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_CONTROL_PT,
+    .access_cb =   ble_keyboard_access,
+    .flags =       BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE,
+  },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT_MAP,
+    .access_cb =   ble_keyboard_access,
+    .flags =       BLE_GATT_CHR_F_READ,
+  },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_PROTOCOL,
+    .access_cb =   ble_keyboard_access,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP,
+  },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT,
+    .access_cb =   ble_keyboard_access,
+    .arg =         (void *)1,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+    .val_handle =  &g_handle_keyboard,
+  },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT,
+    .access_cb =   ble_keyboard_access,
+    .arg =         (void *)2,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+    .val_handle =  &g_handle_media,
+  },
+  { 0 },
+};
+
+static struct ble_gatt_svc_def gatt_services[] = {
+  {
+    .type = BLE_GATT_SVC_TYPE_PRIMARY,
+    .uuid = (const ble_uuid_t *)&UUID_HID_SERVICE,
+    .characteristics = hid_chrs,
+  },
+  { 0 },
+};
+
+/* --- GAP events --- */
+static int gap_event(struct ble_gap_event *event, void *arg) {
+  switch (event->type) {
+    case BLE_GAP_EVENT_CONNECT:
+      if (event->connect.status == 0) {
+        g_connected = true;
+        g_conn_handle = event->connect.conn_handle;
+        ESP_LOGI(TAG, "Connected");
+      } else {
+        ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
+      }
+      break;
+    case BLE_GAP_EVENT_DISCONNECT:
+      g_connected = false;
+      g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+      ESP_LOGI(TAG, "Disconnected; reason=%d", event->disconnect.reason);
+      break;
+    case BLE_GAP_EVENT_SUBSCRIBE:
+      ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
+               event->subscribe.cur_notify, event->subscribe.conn_handle);
+      break;
+    default:
+      break;
+  }
+  return 0;
+}
+
+static void start_advertising(const char *name) {
+  struct ble_gap_adv_params adv_params;
+  struct ble_hs_adv_fields fields;
+  memset(&fields, 0, sizeof(fields));
+
+  fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+  fields.name = (uint8_t *)name;
+  fields.name_len = strlen(name);
+  fields.name_is_complete = 1;
+  fields.appearance = 0x03C1;
+  fields.appearance_is_present = 1;
+
+  int rc = ble_gap_adv_set_fields(&fields);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "ble_gap_adv_set_fields failed: %d", rc);
+    return;
   }
 
-  std::vector<uint16_t> ids = pServer->getPeerDevices();
+  memset(&adv_params, 0, sizeof(adv_params));
+  adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
+  adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
-  if (ids.size() > 0) {
-    for (uint16_t &id : ids) {
-      pServer->disconnect(id);
-    }
+  rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, gap_event, NULL);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "ble_gap_adv_start failed: %d", rc);
   } else {
-    pServer->stopAdvertising();
+    ESP_LOGI(TAG, "Advertising started");
   }
 }
 
-void Esp32BleKeyboard::start() {
-  if (this->reconnect_) {
-    pServer->advertiseOnDisconnect(true);
-  }
-
-  pServer->startAdvertising();
+extern "C" void nimble_host_task(void *param) {
+  ESP_LOGI(TAG, "NimBLE host task started");
+  nimble_port_run();
+  nimble_port_freertos_deinit();
 }
 
-void Esp32BleKeyboard::update() { state_sensor_->publish_state(bleKeyboard.isConnected()); }
-
-bool Esp32BleKeyboard::is_connected() {
-  if (!bleKeyboard.isConnected()) {
-    ESP_LOGI(TAG, "Disconnected");
-
-    return false;
+static void ble_on_sync(const char *name) {
+  ESP_LOGI(TAG, "Bluetooth synced");
+  int rc = ble_gatts_count_cfg(gatt_services);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
+    return;
   }
-
-  return true;
+  rc = ble_gatts_add_svcs(gatt_services);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
+    return;
+  }
+  start_advertising(name);
 }
 
-void Esp32BleKeyboard::update_timer() {
-  this->cancel_timeout((const std::string) TAG);
-  this->set_timeout((const std::string) TAG, release_delay_, [this]() { this->release(); });
+static void ble_on_reset(int reason) {
+  ESP_LOGE(TAG, "Bluetooth reset; reason=%d", reason);
+}
+
+/* --- class methods --- */
+
+void Esp32BleKeyboard::setup() {
+  ESP_LOGI(TAG, "Setting up BLE Keyboard (ESP-IDF NimBLE)");
+
+  ESP_ERROR_CHECK(nimble_port_init());
+
+  ble_svc_gap_device_name_set(name_.c_str());
+  ble_svc_gap_init();
+  ble_svc_gatt_init();
+  ble_svc_bas_init();
+
+  ble_hs_cfg.sync_cb = [](void) { ble_on_sync(ble_svc_gap_device_name()); };
+  ble_hs_cfg.reset_cb = ble_on_reset;
+
+  nimble_port_freertos_init(nimble_host_task);
+}
+
+void Esp32BleKeyboard::update() {
+  if (state_sensor_ != nullptr) {
+    state_sensor_->publish_state(g_connected);
+  }
+}
+
+void Esp32BleKeyboard::set_battery_level(uint8_t level) {
+  battery_level_ = level;
+  ble_svc_bas_battery_level_set(level);
+}
+
+void Esp32BleKeyboard::send_keyboard_report(uint8_t modifiers, uint8_t key1, uint8_t key2,
+                                             uint8_t key3, uint8_t key4, uint8_t key5, uint8_t key6) {
+  keyboard_report_[0] = modifiers;
+  keyboard_report_[1] = 0;
+  keyboard_report_[2] = key1;
+  keyboard_report_[3] = key2;
+  keyboard_report_[4] = key3;
+  keyboard_report_[5] = key4;
+  keyboard_report_[6] = key5;
+  keyboard_report_[7] = key6;
+
+  if (g_handle_keyboard != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(keyboard_report_, sizeof(keyboard_report_));
+    if (om != nullptr) {
+      ble_gattc_notify_custom(g_conn_handle, g_handle_keyboard, om);
+    }
+  }
+}
+
+void Esp32BleKeyboard::send_media_report(uint8_t byte0, uint8_t byte1) {
+  media_report_[0] = byte0;
+  media_report_[1] = byte1;
+
+  if (g_handle_media != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(media_report_, sizeof(media_report_));
+    if (om != nullptr) {
+      ble_gattc_notify_custom(g_conn_handle, g_handle_media, om);
+    }
+  }
 }
 
 void Esp32BleKeyboard::press(std::string message) {
-  if (this->is_connected()) {
-    if (message.length() >= 5) {
-      for (unsigned i = 0; i < message.length(); i += 5) {
-        bleKeyboard.print(message.substr(i, 5).c_str());
-
-        delay(default_delay_);
-      }
-
-      return;
-    }
-
-    bleKeyboard.print(message.c_str());
+  if (!g_connected) {
+    ESP_LOGW(TAG, "Not connected, cannot print");
+    return;
   }
+  if (message.length() >= 5) {
+    for (unsigned i = 0; i < message.length(); i += 5) {
+      ESP_LOGD(TAG, "print chunk: %s", message.substr(i, 5).c_str());
+      delay(default_delay_);
+    }
+    return;
+  }
+  ESP_LOGD(TAG, "print: %s", message.c_str());
 }
 
 void Esp32BleKeyboard::press(uint8_t key, bool with_timer) {
-  if (this->is_connected()) {
-    if (with_timer) {
-      this->update_timer();
-    }
-
-    bleKeyboard.press(key);
+  if (!g_connected) {
+    ESP_LOGW(TAG, "Not connected, cannot press key");
+    return;
   }
+  if (with_timer) {
+    update_timer();
+  }
+  send_keyboard_report(0, key);
 }
 
 void Esp32BleKeyboard::press(MediaKeyReport key, bool with_timer) {
-  if (this->is_connected()) {
-    if (with_timer) {
-      this->update_timer();
-    }
-    bleKeyboard.press(key);
+  if (!g_connected) {
+    ESP_LOGW(TAG, "Not connected, cannot press media key");
+    return;
   }
+  if (with_timer) {
+    update_timer();
+  }
+  send_media_report(key[0], key[1]);
 }
 
 void Esp32BleKeyboard::release() {
-  if (this->is_connected()) {
-    this->cancel_timeout((const std::string) TAG);
-    bleKeyboard.releaseAll();
+  if (!g_connected) {
+    return;
+  }
+  cancel_timeout(TAG);
+  send_keyboard_report(0, 0);
+  send_media_report(0, 0);
+}
+
+void Esp32BleKeyboard::start() {
+  if (reconnect_) {
+    start_advertising(name_.c_str());
   }
 }
+
+void Esp32BleKeyboard::stop() {
+  ble_gap_adv_stop();
+}
+
+bool Esp32BleKeyboard::is_connected() {
+  return g_connected;
+}
+
+void Esp32BleKeyboard::update_timer() {
+  cancel_timeout(TAG);
+  set_timeout(TAG, release_delay_, [this]() { this->release(); });
+}
+
 }  // namespace ble_keyboard
 }  // namespace esphome
 
-#endif
+#endif  // USE_ESP32

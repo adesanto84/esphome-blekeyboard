@@ -29,7 +29,7 @@ template<typename... Ts> class Esp32BleKeyboardPressAction : public Action<Ts...
     if (keys_.size() > 1) {
       MediaKeyReport mediaKey = {keys_[0], keys_[1]};
 
-      this->ble_keyboard_->press(mediaKey);
+      this->ble_keyboard_->press(mediaKey, true);
     } else {
       this->ble_keyboard_->press(this->code_.value(x...));
     }

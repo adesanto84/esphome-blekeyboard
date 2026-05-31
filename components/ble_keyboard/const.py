@@ -51,25 +51,7 @@ ACTION_PRESS_CLASS: Final = "Esp32BleKeyboardPressAction"
 ACTION_RELEASE_CLASS: Final = "Esp32BleKeyboardReleaseAction"
 ACTION_COMBINATION_CLASS: Final = "Esp32BleKeyboardCombinationAction"
 
-"""Libraries"""
-LIBS_DEFAULT: Final = [
-    ("ESP32 BLE Arduino", "1.0.1", None),
-]
 
-LIBS_ADDITIONAL: Final = [
-    (
-        "h2zero/NimBLE-Arduino",
-        "1.4.0",
-        None,
-    ),
-    (
-        "t-vk/ESP32 BLE Keyboard",
-        "0.3.2",
-        None,
-    ),
-]
-
-BUILD_FLAGS: Final = "-D USE_NIMBLE"
 
 """Binary sensors"""
 BINARY_SENSOR_STATE: Final = {
