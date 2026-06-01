@@ -85,7 +85,7 @@ static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
   uint16_t uuid16 = ble_uuid_u16(ctxt->chr->uuid);
   int rc = 0;
 
-  ESP_LOGD(TAG, "GATT access: uuid=0x%04X op=%d arg=%p handle=%d",
+  ESP_LOGI(TAG, "GATT access: uuid=0x%04X op=%d arg=%p handle=%d",
            uuid16, ctxt->op, arg, attr_handle);
 
   switch (uuid16) {
