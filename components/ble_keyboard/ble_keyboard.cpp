@@ -81,9 +81,12 @@ static char g_manufacturer_id[32] = "ESPHome";
 
 /* --- access callback (free function so C GATT tables can reference it) --- */
 static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
-                                struct ble_gatt_access_ctxt *ctxt, void *arg) {
+                                 struct ble_gatt_access_ctxt *ctxt, void *arg) {
   uint16_t uuid16 = ble_uuid_u16(ctxt->chr->uuid);
   int rc = 0;
+
+  ESP_LOGD(TAG, "GATT access: uuid=0x%04X op=%d arg=%p handle=%d",
+           uuid16, ctxt->op, arg, attr_handle);
 
   switch (uuid16) {
     case 0x2A4A:
@@ -121,23 +124,37 @@ static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
       if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         if (attr_handle == g_handle_keyboard) {
           rc = os_mbuf_append(ctxt->om, keyboard_report_, sizeof(keyboard_report_));
+          ESP_LOGD(TAG, "Read keyboard report OK");
         } else if (attr_handle == g_handle_media) {
           rc = os_mbuf_append(ctxt->om, media_report_, sizeof(media_report_));
+          ESP_LOGD(TAG, "Read media report OK");
         } else if (attr_handle == g_handle_output) {
           rc = os_mbuf_append(ctxt->om, keyboard_output_report_, sizeof(keyboard_output_report_));
+          ESP_LOGD(TAG, "Read output report OK");
+        } else {
+          ESP_LOGW(TAG, "Read HID Report on unknown handle=%d (key=%d med=%d out=%d)",
+                   attr_handle, g_handle_keyboard, g_handle_media, g_handle_output);
+          rc = BLE_ATT_ERR_ATTR_NOT_FOUND;
         }
       } else if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
         if (attr_handle == g_handle_output) {
           rc = ble_hs_mbuf_to_flat(ctxt->om, keyboard_output_report_, sizeof(keyboard_output_report_), NULL);
           ESP_LOGD(TAG, "Keyboard LED output: 0x%02X", keyboard_output_report_[0]);
+        } else {
+          ESP_LOGW(TAG, "Write HID Report on unknown handle=%d", attr_handle);
+          rc = BLE_ATT_ERR_ATTR_NOT_FOUND;
         }
       }
       break;
     default:
+      ESP_LOGW(TAG, "GATT access: unhandled uuid=0x%04X", uuid16);
       rc = BLE_ATT_ERR_UNLIKELY;
       break;
   }
-  return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+  if (rc != 0) {
+    ESP_LOGW(TAG, "GATT access returning rc=%d", rc);
+  }
+  return rc;
 }
 
 /* --- GATT service definition --- */
@@ -189,7 +206,7 @@ static struct ble_gatt_chr_def hid_chrs[] = {
     .access_cb =   ble_keyboard_access,
     .arg =         nullptr,
     .descriptors = nullptr,
-    .flags =       BLE_GATT_CHR_F_READ,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_READ_ENC,
     .min_key_size = 0,
     .val_handle =  nullptr,
   },
@@ -198,7 +215,7 @@ static struct ble_gatt_chr_def hid_chrs[] = {
     .access_cb =   ble_keyboard_access,
     .arg =         nullptr,
     .descriptors = nullptr,
-    .flags =       BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE,
+    .flags =       BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_ENC,
     .min_key_size = 0,
     .val_handle =  nullptr,
   },
