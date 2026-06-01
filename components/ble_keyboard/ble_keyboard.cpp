@@ -373,15 +373,15 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_ENC_CHANGE:
       ESP_LOGI(TAG, "Encryption change: conn_handle=%d status=%d",
                event->enc_change.conn_handle, event->enc_change.status);
-      // If encryption failed (e.g. status=7 BLE_SM_ERR_AUTHREQ), the
-      // stored LTK is invalid. Delete the bond so the next connection
-      // does a fresh pairing instead of looping with a bad LTK.
+      // If encryption failed it usually means Windows is offering a
+      // stale LTK. Log it loudly so the user knows to remove the
+      // device from Windows and pair fresh. We do NOT delete the
+      // bond here automatically; that just creates a reconnect loop
+      // because Windows keeps offering the same stale LTK.
       if (event->enc_change.status != 0) {
-        struct ble_gap_conn_desc conn;
-        if (ble_gap_conn_find(event->enc_change.conn_handle, &conn) == 0) {
-          ESP_LOGW(TAG, "Encryption failed, deleting stale bond for peer");
-          ble_store_util_delete_peer(&conn.peer_id_addr);
-        }
+        ESP_LOGW(TAG, "Encryption failed (status=%d) - please remove the "
+                       "device from Windows Bluetooth settings and pair again",
+                       event->enc_change.status);
       }
       break;
     case BLE_GAP_EVENT_MTU:
@@ -480,12 +480,19 @@ void Esp32BleKeyboard::setup() {
   ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
   ble_hs_cfg.reset_cb = ble_on_reset;
 
+  // Use LE Legacy pairing (sm_sc=0) with Just Works. Windows + NimBLE
+  // have known issues with sm_sc=1 when sm_mitm=0, where the central
+  // rejects the auth request with BLE_SM_ERR_AUTHREQ (status=7). LE
+  // Legacy Just Works is the most compatible option for no-IO keyboards.
   ble_hs_cfg.sm_bonding = 1;
   ble_hs_cfg.sm_mitm = 0;
-  ble_hs_cfg.sm_sc = 1;
+  ble_hs_cfg.sm_sc = 0;
   ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
-  ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
-  ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+  // Only request the encryption key (LTK) from the central. Asking for
+  // the Identity key (IRK) on top of LTK sometimes confuses the host
+  // and triggers a status=7 reject.
+  ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC;
+  ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC;
 
   // CRITICAL: register all GATT services BEFORE nimble_port_freertos_init().
   // ble_gatts_start() runs inside ble_hs_start() which runs when the host
