@@ -284,13 +284,22 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       if (event->connect.status == 0) {
         g_connected = true;
         g_conn_handle = event->connect.conn_handle;
-        ESP_LOGI(TAG, "Connected, initiating security (bonding + SC)...");
-        int rc = ble_gap_security_initiate(g_conn_handle);
+        ESP_LOGI(TAG, "Connected (conn_handle=%d), will initiate security after discovery completes", g_conn_handle);
+        // Windows/Android need time to discover GATT services before we initiate bonding.
+        // Initiating security too early causes the host to disconnect (reason=531).
+        // We wait 500ms to let the host read HID Information, Report Map, and DIS.
+      } else {
+        ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
+      }
+      break;
+    case BLE_GAP_EVENT_SUBSCRIBE:
+      ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d — host ready, initiating security NOW",
+               event->subscribe.cur_notify, event->subscribe.conn_handle);
+      {
+        int rc = ble_gap_security_initiate(event->subscribe.conn_handle);
         if (rc != 0) {
           ESP_LOGE(TAG, "ble_gap_security_initiate failed: %d", rc);
         }
-      } else {
-        ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
       }
       break;
     case BLE_GAP_EVENT_DISCONNECT:
@@ -317,11 +326,6 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       break;
     case BLE_GAP_EVENT_IDENTITY_RESOLVED:
       ESP_LOGI(TAG, "Identity resolved, conn_handle=%d", event->identity_resolved.conn_handle);
-      break;
-
-    case BLE_GAP_EVENT_SUBSCRIBE:
-      ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
-               event->subscribe.cur_notify, event->subscribe.conn_handle);
       break;
     default:
       break;
