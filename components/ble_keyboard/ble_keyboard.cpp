@@ -354,42 +354,42 @@ extern "C" void nimble_host_task(void *param) {
 }
 
 static void ble_on_sync_impl() {
-  ESP_LOGI(TAG, "Bluetooth synced");
-  
-  /* Set device name BEFORE initializing GAP service so the GAP service
-     picks up the correct name instead of the default "nimble". */
+  ESP_LOGI(TAG, "sync: step 1 - set device name");
   int rc = ble_svc_gap_device_name_set(g_device_name);
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_svc_gap_device_name_set failed: %d", rc);
   }
+  ESP_LOGI(TAG, "sync: step 2 - init GAP");
   ble_svc_gap_init();
+  ESP_LOGI(TAG, "sync: step 3 - init GATT");
   ble_svc_gatt_init();
+  ESP_LOGI(TAG, "sync: step 4 - init BAS");
   ble_svc_bas_init();
 
-  // Device Info Service (DIS) - required by Windows for HID pairing
+  ESP_LOGI(TAG, "sync: step 5 - DIS");
   ble_svc_dis_manufacturer_name_set(g_manufacturer_id);
   ble_svc_dis_model_number_set("BLE Keyboard");
-  // PNP ID: Vendor ID Source, Vendor ID, Product ID, Product Version
   static const uint8_t pnp_id[7] = {
-    0x02,        // Vendor ID Source: USB Implementer's Forum
-    0x5A, 0x04,  // Vendor ID (0x045A = generic)
-    0x01, 0x00,  // Product ID
-    0x00, 0x01,  // Product Version
+    0x02, 0x5A, 0x04, 0x01, 0x00, 0x00, 0x01,
   };
   ble_svc_dis_pnp_id_set((const char *)pnp_id);
   ble_svc_dis_init();
 
+  ESP_LOGI(TAG, "sync: step 6 - GATT cfg");
   rc = ble_gatts_count_cfg(gatt_services);
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
     return;
   }
+  ESP_LOGI(TAG, "sync: step 7 - add svcs");
   rc = ble_gatts_add_svcs(gatt_services);
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
     return;
   }
+  ESP_LOGI(TAG, "sync: step 8 - advertising");
   start_advertising(g_device_name);
+  ESP_LOGI(TAG, "sync: complete");
 }
 
 static void ble_on_sync_wrapper(void) {
@@ -403,16 +403,25 @@ static void ble_on_reset(int reason) {
 /* --- class methods --- */
 
 void Esp32BleKeyboard::setup() {
-  ESP_LOGI(TAG, "Setting up BLE Keyboard (ESP-IDF NimBLE)");
+  ESP_LOGI(TAG, "setup() step 1: names");
 
   strncpy(g_device_name, name_.c_str(), sizeof(g_device_name) - 1);
   g_device_name[sizeof(g_device_name) - 1] = '\0';
   strncpy(g_manufacturer_id, manufacturer_id_.c_str(), sizeof(g_manufacturer_id) - 1);
   g_manufacturer_id[sizeof(g_manufacturer_id) - 1] = '\0';
 
-  ESP_ERROR_CHECK(nimble_port_init());
+  ESP_LOGI(TAG, "setup() step 2: nimble_port_init");
+  esp_err_t err = nimble_port_init();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "nimble_port_init failed: %d", err);
+    return;
+  }
 
-  // Security Manager config: Just Works pairing (no MITM) + bonding + SC.
+  ESP_LOGI(TAG, "setup() step 3: callbacks");
+  ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
+  ble_hs_cfg.reset_cb = ble_on_reset;
+
+  ESP_LOGI(TAG, "setup() step 4: SM config");
   ble_hs_cfg.sm_bonding = 1;
   ble_hs_cfg.sm_mitm = 0;
   ble_hs_cfg.sm_sc = 1;
@@ -420,10 +429,9 @@ void Esp32BleKeyboard::setup() {
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
-  ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
-  ble_hs_cfg.reset_cb = ble_on_reset;
-
+  ESP_LOGI(TAG, "setup() step 5: init host task");
   nimble_port_freertos_init(nimble_host_task);
+  ESP_LOGI(TAG, "setup() complete");
 }
 void Esp32BleKeyboard::update() {
   if (state_sensor_ != nullptr) {
