@@ -56,7 +56,7 @@ class Esp32BleKeyboard : public PollingComponent {
   uint8_t battery_level_{100};
   bool reconnect_{true};
   uint32_t default_delay_{100};
-  uint32_t release_delay_{8};
+  uint32_t release_delay_{50};
 };
 
 }  // namespace ble_keyboard

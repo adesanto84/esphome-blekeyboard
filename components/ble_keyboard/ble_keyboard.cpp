@@ -344,10 +344,15 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       g_connected = false;
       g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
       ESP_LOGI(TAG, "Disconnected; reason=%d", event->disconnect.reason);
+      // Restart advertising so the central can reconnect. Without this,
+      // the device stays in 'paired' state in Windows but invisible to
+      // new connections, forcing the user to remove and re-pair.
+      start_advertising(g_device_name);
       break;
     case BLE_GAP_EVENT_SUBSCRIBE:
-      ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
-               event->subscribe.cur_notify, event->subscribe.conn_handle);
+      ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d attr_handle=%d",
+               event->subscribe.cur_notify, event->subscribe.conn_handle,
+               event->subscribe.attr_handle);
       break;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
       ESP_LOGI(TAG, "Passkey action on conn_handle=%d", event->passkey.conn_handle);
