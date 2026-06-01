@@ -332,11 +332,10 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       if (event->connect.status == 0) {
         g_connected = true;
         g_conn_handle = event->connect.conn_handle;
-        ESP_LOGI(TAG, "Connected (conn_handle=%d), initiating bonding...", g_conn_handle);
-        int rc = ble_gap_security_initiate(g_conn_handle);
-        if (rc != 0) {
-          ESP_LOGW(TAG, "ble_gap_security_initiate failed: %d (will retry on disconnect)", rc);
-        }
+        ESP_LOGI(TAG, "Connected (conn_handle=%d)", g_conn_handle);
+        // Do NOT call ble_gap_security_initiate() here — Windows initiates
+        // pairing on its own, and forcing a parallel security request
+        // confuses the SM state machine.
       } else {
         ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
       }
@@ -367,6 +366,18 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       ESP_LOGI(TAG, "Encryption change: conn_handle=%d status=%d",
                event->enc_change.conn_handle, event->enc_change.status);
       break;
+    case BLE_GAP_EVENT_MTU:
+      ESP_LOGI(TAG, "MTU update: conn_handle=%d mtu=%d",
+               event->mtu.conn_handle, event->mtu.value);
+      break;
+    case BLE_GAP_EVENT_CONN_UPDATE:
+      ESP_LOGI(TAG, "Conn param update: conn_handle=%d status=%d",
+               event->conn_update.conn_handle, event->conn_update.status);
+      break;
+    case BLE_GAP_EVENT_CONN_UPDATE_REQ:
+      ESP_LOGI(TAG, "Conn param update req: conn_handle=%d", event->conn_update_req.conn_handle);
+      // Accept the parameter update request
+      return 0;
     default:
       break;
   }
