@@ -549,13 +549,21 @@ void Esp32BleKeyboard::send_keyboard_report(uint8_t modifiers, uint8_t key1, uin
   boot_key_report_[7] = key6;
 
   if (g_handle_keyboard != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
+    ESP_LOGI(TAG, "Sending keyboard report: mod=0x%02X k1=0x%02X k2=0x%02X k3=0x%02X k4=0x%02X k5=0x%02X k6=0x%02X",
+             modifiers, key1, key2, key3, key4, key5, key6);
     struct os_mbuf *om = ble_hs_mbuf_from_flat(keyboard_report_, sizeof(keyboard_report_));
     if (om != nullptr) {
       // ble_gatts_notify_custom: we are the GATT server (peripheral),
       // pushing a notification to a subscribed client. ble_gattc_* is for
       // the central/client role, which is not what we want here.
-      ble_gatts_notify_custom(g_conn_handle, g_handle_keyboard, om);
+      int rc = ble_gatts_notify_custom(g_conn_handle, g_handle_keyboard, om);
+      ESP_LOGI(TAG, "  ble_gatts_notify_custom rc=%d handle=%d conn=%d",
+               rc, g_handle_keyboard, g_conn_handle);
+    } else {
+      ESP_LOGE(TAG, "Failed to allocate mbuf for keyboard report");
     }
+  } else {
+    ESP_LOGW(TAG, "Cannot send keyboard: handle=%d conn=%d", g_handle_keyboard, g_conn_handle);
   }
 }
 
