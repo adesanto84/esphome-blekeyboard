@@ -288,7 +288,7 @@ static struct ble_gatt_chr_def hid_chrs[] = {
     .access_cb =   ble_keyboard_access,
     .arg =         (void *)1,
     .descriptors = keyboard_report_dscs,
-    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_WRITE,
     .min_key_size = 0,
     .val_handle =  &g_handle_keyboard,
   },
@@ -297,7 +297,7 @@ static struct ble_gatt_chr_def hid_chrs[] = {
     .access_cb =   ble_keyboard_access,
     .arg =         (void *)2,
     .descriptors = media_report_dscs,
-    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY | BLE_GATT_CHR_F_WRITE,
     .min_key_size = 0,
     .val_handle =  &g_handle_media,
   },
@@ -530,10 +530,11 @@ void Esp32BleKeyboard::setup() {
     return;
   }
 
-  // Wipe the bond store at boot so we never connect with a stale LTK.
-  // The store lives in NVS and is re-populated on each new pairing.
-  ESP_LOGI(TAG, "Clearing all bond info to start fresh");
-  ble_store_clear();
+  // Do NOT clear all bonds at boot. Wiping the bond store at every boot
+  // means Windows can never re-subscribe to notifications after a
+  // reboot (it gets stuck in the AUTHREQ failure loop). Bonds persist
+  // across reboots on purpose; we only delete them on actual encryption
+  // failure to recover from a corrupt LTK.
 
   ESP_LOGI(TAG, "Starting NimBLE host task...");
   nimble_port_freertos_init(nimble_host_task);
