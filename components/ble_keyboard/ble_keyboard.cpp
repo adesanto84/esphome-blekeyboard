@@ -426,43 +426,9 @@ extern "C" void nimble_host_task(void *param) {
 
 static void ble_on_sync_impl() {
   ESP_LOGI(TAG, "Bluetooth synced");
-  
-  // Initialize standard GAP, GATT, and BAS services first.
-  // IMPORTANT: ble_svc_gap_init() must precede setters.
-  ble_svc_gap_init();
-  ble_svc_gatt_init();
-  ble_svc_bas_init();
-
-  int rc = ble_svc_gap_device_name_set(g_device_name);
-  if (rc != 0) {
-    ESP_LOGE(TAG, "ble_svc_gap_device_name_set failed: %d", rc);
-  }
-  rc = ble_svc_gap_device_appearance_set(0x03C1);  // Appearance = Keyboard
-  if (rc != 0) {
-    ESP_LOGW(TAG, "ble_svc_gap_device_appearance_set failed: %d", rc);
-  }
-
-  // Device Info Service (DIS) - required by Windows for HID pairing
-  // Must init service BEFORE setting its characteristics.
-  ble_svc_dis_init();
-  ble_svc_dis_manufacturer_name_set(g_manufacturer_id);
-  ble_svc_dis_model_number_set("BLE Keyboard");
-  // PnP ID: Vendor ID source=0x02 (USB IF), VID=0x1234 (generic), PID=0x0001, Version=0x0001
-  static const uint8_t pnp_id[7] = {
-    0x02, 0x34, 0x12, 0x01, 0x00, 0x00, 0x01,
-  };
-  ble_svc_dis_pnp_id_set((const char *)pnp_id);
-
-  rc = ble_gatts_count_cfg(gatt_services);
-  if (rc != 0) {
-    ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
-    return;
-  }
-  rc = ble_gatts_add_svcs(gatt_services);
-  if (rc != 0) {
-    ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
-    return;
-  }
+  // All GATT services were registered in setup() before
+  // nimble_port_freertos_init() so they are visible to the central.
+  // Here we only need to start advertising.
   start_advertising(g_device_name);
 }
 
@@ -492,6 +458,7 @@ void Esp32BleKeyboard::setup() {
   }
   ESP_LOGI(TAG, "nimble_port_init() succeeded");
 
+  // Register NimBLE host callbacks and SM config
   ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
   ble_hs_cfg.reset_cb = ble_on_reset;
 
@@ -501,6 +468,46 @@ void Esp32BleKeyboard::setup() {
   ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
+  // CRITICAL: register all GATT services BEFORE nimble_port_freertos_init().
+  // ble_gatts_start() runs inside ble_hs_start() which runs when the host
+  // task starts, and it only processes the ble_gatts_svc_defs that are
+  // present at that moment. Adding services later (e.g. from the sync
+  // callback) leaves the GATT database empty from the central's POV.
+  ESP_LOGI(TAG, "Registering GATT services...");
+
+  // Standard services: each *_init() internally calls ble_gatts_count_cfg()
+  // and ble_gatts_add_svcs() for its own service definition.
+  ble_svc_gap_init();
+  ble_svc_gatt_init();
+  ble_svc_bas_init();
+
+  int rc = ble_svc_gap_device_name_set(g_device_name);
+  if (rc != 0) ESP_LOGE(TAG, "ble_svc_gap_device_name_set failed: %d", rc);
+  rc = ble_svc_gap_device_appearance_set(0x03C1);  // Appearance = Keyboard
+  if (rc != 0) ESP_LOGW(TAG, "ble_svc_gap_device_appearance_set failed: %d", rc);
+
+  // Device Information Service
+  ble_svc_dis_init();
+  ble_svc_dis_manufacturer_name_set(g_manufacturer_id);
+  ble_svc_dis_model_number_set("BLE Keyboard");
+  // PnP ID: VID Source=0x02 (USB IF), VID=0x1234 (generic), PID=0x0001, Version=0x0001
+  static const uint8_t pnp_id[7] = {
+    0x02, 0x34, 0x12, 0x01, 0x00, 0x00, 0x01,
+  };
+  ble_svc_dis_pnp_id_set((const char *)pnp_id);
+
+  // Custom HID service
+  rc = ble_gatts_count_cfg(gatt_services);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
+    return;
+  }
+  rc = ble_gatts_add_svcs(gatt_services);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
+    return;
+  }
 
   ESP_LOGI(TAG, "Starting NimBLE host task...");
   nimble_port_freertos_init(nimble_host_task);
