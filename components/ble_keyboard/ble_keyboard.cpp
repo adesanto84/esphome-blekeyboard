@@ -481,6 +481,9 @@ void Esp32BleKeyboard::setup() {
   ble_svc_gap_init();
   ble_svc_gatt_init();
   ble_svc_bas_init();
+  // Initialize battery level to the component-configured value (default 100)
+  // so the central sees something other than 0% on first read.
+  ble_svc_bas_battery_level_set(battery_level_);
 
   int rc = ble_svc_gap_device_name_set(g_device_name);
   if (rc != 0) ESP_LOGE(TAG, "ble_svc_gap_device_name_set failed: %d", rc);
@@ -548,7 +551,10 @@ void Esp32BleKeyboard::send_keyboard_report(uint8_t modifiers, uint8_t key1, uin
   if (g_handle_keyboard != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
     struct os_mbuf *om = ble_hs_mbuf_from_flat(keyboard_report_, sizeof(keyboard_report_));
     if (om != nullptr) {
-      ble_gattc_notify_custom(g_conn_handle, g_handle_keyboard, om);
+      // ble_gatts_notify_custom: we are the GATT server (peripheral),
+      // pushing a notification to a subscribed client. ble_gattc_* is for
+      // the central/client role, which is not what we want here.
+      ble_gatts_notify_custom(g_conn_handle, g_handle_keyboard, om);
     }
   }
 }
@@ -561,7 +567,7 @@ void Esp32BleKeyboard::send_media_report(uint8_t byte0, uint8_t byte1) {
   if (g_handle_media != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
     struct os_mbuf *om = ble_hs_mbuf_from_flat(media_report_, sizeof(media_report_));
     if (om != nullptr) {
-      ble_gattc_notify_custom(g_conn_handle, g_handle_media, om);
+      ble_gatts_notify_custom(g_conn_handle, g_handle_media, om);
     }
   }
 }
