@@ -388,14 +388,20 @@ extern "C" void nimble_host_task(void *param) {
 static void ble_on_sync_impl() {
   ESP_LOGI(TAG, "Bluetooth synced");
   
-  // Initialize standard GAP, GATT, and BAS services first
+  // Initialize standard GAP, GATT, and BAS services first.
+  // IMPORTANT: ble_svc_gap_init() must precede setters.
+  ble_svc_gap_init();
+  ble_svc_gatt_init();
+  ble_svc_bas_init();
+
   int rc = ble_svc_gap_device_name_set(g_device_name);
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_svc_gap_device_name_set failed: %d", rc);
   }
-  ble_svc_gap_init();
-  ble_svc_gatt_init();
-  ble_svc_bas_init();
+  rc = ble_svc_gap_device_appearance_set(0x03C1);  // Appearance = Keyboard
+  if (rc != 0) {
+    ESP_LOGW(TAG, "ble_svc_gap_device_appearance_set failed: %d", rc);
+  }
 
   // Device Info Service (DIS) - required by Windows for HID pairing
   // Must init service BEFORE setting its characteristics.
