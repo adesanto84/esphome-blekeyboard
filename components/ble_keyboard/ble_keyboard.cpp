@@ -13,6 +13,7 @@
 #include "services/gatt/ble_svc_gatt.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/bas/ble_svc_bas.h"
+#include "services/dis/ble_svc_dis.h"
 
 namespace esphome {
 namespace ble_keyboard {
@@ -56,6 +57,8 @@ static const ble_uuid16_t UUID_HID_CONTROL_PT   = BLE_UUID16_INIT(0x2A4C);
 static const ble_uuid16_t UUID_HID_REPORT_MAP   = BLE_UUID16_INIT(0x2A4B);
 static const ble_uuid16_t UUID_HID_PROTOCOL     = BLE_UUID16_INIT(0x2A4E);
 static const ble_uuid16_t UUID_HID_REPORT       = BLE_UUID16_INIT(0x2A4D);
+static const ble_uuid16_t UUID_HID_BOOT_INPUT   = BLE_UUID16_INIT(0x2A22);
+static const ble_uuid16_t UUID_HID_BOOT_OUTPUT  = BLE_UUID16_INIT(0x2A32);
 static const ble_uuid16_t UUID_REPORT_REF       = BLE_UUID16_INIT(0x2908);
 
 /* --- Report reference data: {Report ID, Report Type} --- */
@@ -67,6 +70,9 @@ static bool g_connected = false;
 static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t g_handle_keyboard = 0;
 static uint16_t g_handle_media = 0;
+static uint16_t g_handle_boot_input = 0;
+static uint8_t boot_key_report_[8] = {0};
+static uint8_t boot_output_leds_ = 0;
 
 /* --- access callback (free function so C GATT tables can reference it) --- */
 static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -95,7 +101,18 @@ static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
         rc = ble_hs_mbuf_to_flat(ctxt->om, &protocol_mode_, 1, NULL);
       }
       break;
-    case 0x2A4D:
+    case 0x2A22:  // Boot Keyboard Input Report
+      if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+        rc = os_mbuf_append(ctxt->om, boot_key_report_, sizeof(boot_key_report_));
+      }
+      break;
+    case 0x2A32:  // Boot Keyboard Output Report (LEDs)
+      if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        rc = ble_hs_mbuf_to_flat(ctxt->om, &boot_output_leds_, 1, NULL);
+        ESP_LOGD(TAG, "Boot Output LED state=0x%02X", boot_output_leds_);
+      }
+      break;
+    case 0x2A4D:  // HID Report (keyboard or media)
       if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         if (attr_handle == g_handle_keyboard) {
           rc = os_mbuf_append(ctxt->om, keyboard_report_, sizeof(keyboard_report_));
@@ -177,6 +194,24 @@ static struct ble_gatt_chr_def hid_chrs[] = {
     .arg =         nullptr,
     .descriptors = nullptr,
     .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP,
+    .min_key_size = 0,
+    .val_handle =  nullptr,
+  },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_BOOT_INPUT,
+    .access_cb =   ble_keyboard_access,
+    .arg =         nullptr,
+    .descriptors = nullptr,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+    .min_key_size = 0,
+    .val_handle =  &g_handle_boot_input,
+  },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_BOOT_OUTPUT,
+    .access_cb =   ble_keyboard_access,
+    .arg =         nullptr,
+    .descriptors = nullptr,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
     .min_key_size = 0,
     .val_handle =  nullptr,
   },
@@ -304,6 +339,19 @@ void Esp32BleKeyboard::setup() {
   ble_svc_gatt_init();
   ble_svc_bas_init();
 
+  // Device Info Service (DIS) - required by Windows for HID pairing
+  ble_svc_dis_manufacturer_name_set(manufacturer_id_.c_str());
+  ble_svc_dis_model_number_set("BLE Keyboard");
+  // PNP ID: Vendor ID Source, Vendor ID, Product ID, Product Version
+  static const uint8_t pnp_id[7] = {
+    0x02,        // Vendor ID Source: USB Implementer's Forum
+    0x5A, 0x04,  // Vendor ID (0x045A = generic)
+    0x01, 0x00,  // Product ID
+    0x00, 0x01,  // Product Version
+  };
+  ble_svc_dis_pnp_id_set((const char *)pnp_id);
+  ble_svc_dis_init();
+
   ble_hs_cfg.sync_cb = [](void) { ble_on_sync(ble_svc_gap_device_name()); };
   ble_hs_cfg.reset_cb = ble_on_reset;
 
@@ -332,6 +380,16 @@ void Esp32BleKeyboard::send_keyboard_report(uint8_t modifiers, uint8_t key1, uin
   keyboard_report_[6] = key4;
   keyboard_report_[7] = key5;
   keyboard_report_[8] = key6;
+
+  // Update boot-keyboard report (without Report ID)
+  boot_key_report_[0] = modifiers;
+  boot_key_report_[1] = 0;
+  boot_key_report_[2] = key1;
+  boot_key_report_[3] = key2;
+  boot_key_report_[4] = key3;
+  boot_key_report_[5] = key4;
+  boot_key_report_[6] = key5;
+  boot_key_report_[7] = key6;
 
   if (g_handle_keyboard != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
     struct os_mbuf *om = ble_hs_mbuf_from_flat(keyboard_report_, sizeof(keyboard_report_));
