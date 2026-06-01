@@ -287,7 +287,11 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       if (event->connect.status == 0) {
         g_connected = true;
         g_conn_handle = event->connect.conn_handle;
-        ESP_LOGI(TAG, "Connected (conn_handle=%d)", g_conn_handle);
+        ESP_LOGI(TAG, "Connected (conn_handle=%d), initiating bonding...", g_conn_handle);
+        int rc = ble_gap_security_initiate(g_conn_handle);
+        if (rc != 0) {
+          ESP_LOGW(TAG, "ble_gap_security_initiate failed: %d (will retry on disconnect)", rc);
+        }
       } else {
         ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
       }
