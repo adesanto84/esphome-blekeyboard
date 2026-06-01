@@ -305,6 +305,23 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
                event->subscribe.cur_notify, event->subscribe.conn_handle);
       break;
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+      ESP_LOGI(TAG, "Passkey action on conn_handle=%d", event->passkey.conn_handle);
+      break;
+    case BLE_GAP_EVENT_REPEAT_PAIRING: {
+      ESP_LOGI(TAG, "Repeat pairing: conn_handle=%d",
+               event->repeat_pairing.conn_handle);
+      // Delete old bond info and retry
+      struct ble_gap_conn_desc conn;
+      if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &conn) == 0) {
+        ble_store_util_delete_peer(&conn.peer_id_addr);
+      }
+      return BLE_GAP_REPEAT_PAIRING_RETRY;
+    }
+    case BLE_GAP_EVENT_ENC_CHANGE:
+      ESP_LOGI(TAG, "Encryption change: conn_handle=%d status=%d",
+               event->enc_change.conn_handle, event->enc_change.status);
+      break;
     default:
       break;
   }
