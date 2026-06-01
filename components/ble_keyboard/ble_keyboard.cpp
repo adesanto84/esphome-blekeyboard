@@ -77,6 +77,7 @@ static uint8_t keyboard_output_report_[1] = {0};
 static uint8_t boot_key_report_[8] = {0};
 static uint8_t boot_output_leds_ = 0;
 static char g_device_name[32] = "BLE Keyboard";
+static char g_manufacturer_id[32] = "ESPHome";
 
 /* --- access callback (free function so C GATT tables can reference it) --- */
 static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -283,8 +284,11 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       if (event->connect.status == 0) {
         g_connected = true;
         g_conn_handle = event->connect.conn_handle;
-        ESP_LOGI(TAG, "Connected, initiating security...");
-        ble_gap_security_initiate(g_conn_handle);
+        ESP_LOGI(TAG, "Connected, initiating security (bonding + SC)...");
+        int rc = ble_gap_security_initiate(g_conn_handle);
+        if (rc != 0) {
+          ESP_LOGE(TAG, "ble_gap_security_initiate failed: %d", rc);
+        }
       } else {
         ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
       }
@@ -295,7 +299,11 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       ESP_LOGI(TAG, "Disconnected; reason=%d", event->disconnect.reason);
       break;
     case BLE_GAP_EVENT_ENC_CHANGE:
-      ESP_LOGI(TAG, "Encryption changed, status=%d", event->enc_change.status);
+      if (event->enc_change.status == 0) {
+        ESP_LOGI(TAG, "Encryption established successfully");
+      } else {
+        ESP_LOGE(TAG, "Encryption failed, status=%d", event->enc_change.status);
+      }
       break;
     case BLE_GAP_EVENT_REPEAT_PAIRING:
       ESP_LOGI(TAG, "Repeat pairing detected, retrying");
@@ -322,8 +330,7 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
 }
 
 static void start_advertising(const char *name) {
-  /* Ensure any stale advertising (e.g. boot-time controller packet)
-     is cleared before we publish the correct device name. */
+  /* Ensure any stale advertising is cleared before we publish the correct device name. */
   ble_gap_adv_stop();
 
   struct ble_gap_adv_params adv_params;
@@ -342,6 +349,8 @@ static void start_advertising(const char *name) {
   fields.uuids16_is_complete = 1;
   fields.tx_pwr_lvl = 0;
   fields.tx_pwr_lvl_is_present = 1;
+
+  ESP_LOGI(TAG, "Starting advertising with name='%s'", name);
 
   int rc = ble_gap_adv_set_fields(&fields);
   if (rc != 0) {
@@ -369,7 +378,31 @@ extern "C" void nimble_host_task(void *param) {
 
 static void ble_on_sync_impl() {
   ESP_LOGI(TAG, "Bluetooth synced");
-  int rc = ble_gatts_count_cfg(gatt_services);
+  
+  /* Set device name BEFORE initializing GAP service so the GAP service
+     picks up the correct name instead of the default "nimble". */
+  int rc = ble_svc_gap_device_name_set(g_device_name);
+  if (rc != 0) {
+    ESP_LOGE(TAG, "ble_svc_gap_device_name_set failed: %d", rc);
+  }
+  ble_svc_gap_init();
+  ble_svc_gatt_init();
+  ble_svc_bas_init();
+
+  // Device Info Service (DIS) - required by Windows for HID pairing
+  ble_svc_dis_manufacturer_name_set(g_manufacturer_id);
+  ble_svc_dis_model_number_set("BLE Keyboard");
+  // PNP ID: Vendor ID Source, Vendor ID, Product ID, Product Version
+  static const uint8_t pnp_id[7] = {
+    0x02,        // Vendor ID Source: USB Implementer's Forum
+    0x5A, 0x04,  // Vendor ID (0x045A = generic)
+    0x01, 0x00,  // Product ID
+    0x00, 0x01,  // Product Version
+  };
+  ble_svc_dis_pnp_id_set((const char *)pnp_id);
+  ble_svc_dis_init();
+
+  rc = ble_gatts_count_cfg(gatt_services);
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_gatts_count_cfg failed: %d", rc);
     return;
@@ -397,28 +430,10 @@ void Esp32BleKeyboard::setup() {
 
   strncpy(g_device_name, name_.c_str(), sizeof(g_device_name) - 1);
   g_device_name[sizeof(g_device_name) - 1] = '\0';
+  strncpy(g_manufacturer_id, manufacturer_id_.c_str(), sizeof(g_manufacturer_id) - 1);
+  g_manufacturer_id[sizeof(g_manufacturer_id) - 1] = '\0';
 
   ESP_ERROR_CHECK(nimble_port_init());
-
-  /* Set device name BEFORE ble_svc_gap_init() so the GAP service
-     picks up the correct name instead of the default "nimble". */
-  ble_svc_gap_device_name_set(g_device_name);
-  ble_svc_gap_init();
-  ble_svc_gatt_init();
-  ble_svc_bas_init();
-
-  // Device Info Service (DIS) - required by Windows for HID pairing
-  ble_svc_dis_manufacturer_name_set(manufacturer_id_.c_str());
-  ble_svc_dis_model_number_set("BLE Keyboard");
-  // PNP ID: Vendor ID Source, Vendor ID, Product ID, Product Version
-  static const uint8_t pnp_id[7] = {
-    0x02,        // Vendor ID Source: USB Implementer's Forum
-    0x5A, 0x04,  // Vendor ID (0x045A = generic)
-    0x01, 0x00,  // Product ID
-    0x00, 0x01,  // Product Version
-  };
-  ble_svc_dis_pnp_id_set((const char *)pnp_id);
-  ble_svc_dis_init();
 
   // Security Manager config: Just Works pairing (no MITM) + bonding + SC.
   // MITM=1 + NO_IO is INVALID: Windows aborts pairing during ceremony enumeration.
@@ -429,8 +444,10 @@ void Esp32BleKeyboard::setup() {
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
-  // Stop any stale controller-level advertising that may carry the default "nimble" name
-  // before our sync_cb starts the properly-named advertisement.
+  // Store callback for handling store overflow events (required for bonding persistence)
+  ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
+
+  // Stop any stale controller-level advertising before our sync_cb starts
   ble_gap_adv_stop();
 
   ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
