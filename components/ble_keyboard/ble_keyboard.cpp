@@ -360,7 +360,10 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_REPEAT_PAIRING: {
       ESP_LOGI(TAG, "Repeat pairing: conn_handle=%d",
                event->repeat_pairing.conn_handle);
-      // Delete old bond info and retry
+      // Delete the old bond info and accept the new pairing.
+      // Returning RETRY causes NimBLE to delete the old LTK and start a
+      // fresh pairing. If we don't, Windows keeps retrying with the
+      // mismatched LTK and we see encryption failures (status=7).
       struct ble_gap_conn_desc conn;
       if (ble_gap_conn_find(event->repeat_pairing.conn_handle, &conn) == 0) {
         ble_store_util_delete_peer(&conn.peer_id_addr);
@@ -370,6 +373,16 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_ENC_CHANGE:
       ESP_LOGI(TAG, "Encryption change: conn_handle=%d status=%d",
                event->enc_change.conn_handle, event->enc_change.status);
+      // If encryption failed (e.g. status=7 BLE_SM_ERR_AUTHREQ), the
+      // stored LTK is invalid. Delete the bond so the next connection
+      // does a fresh pairing instead of looping with a bad LTK.
+      if (event->enc_change.status != 0) {
+        struct ble_gap_conn_desc conn;
+        if (ble_gap_conn_find(event->enc_change.conn_handle, &conn) == 0) {
+          ESP_LOGW(TAG, "Encryption failed, deleting stale bond for peer");
+          ble_store_util_delete_peer(&conn.peer_id_addr);
+        }
+      }
       break;
     case BLE_GAP_EVENT_MTU:
       ESP_LOGI(TAG, "MTU update: conn_handle=%d mtu=%d",
@@ -516,6 +529,11 @@ void Esp32BleKeyboard::setup() {
     ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
     return;
   }
+
+  // Wipe the bond store at boot so we never connect with a stale LTK.
+  // The store lives in NVS and is re-populated on each new pairing.
+  ESP_LOGI(TAG, "Clearing all bond info to start fresh");
+  ble_store_clear();
 
   ESP_LOGI(TAG, "Starting NimBLE host task...");
   nimble_port_freertos_init(nimble_host_task);
