@@ -38,7 +38,6 @@ CONF_TEXT: Final = "text"
 CONF_KEYS: Final = "keys"
 CONF_RECONNECT: Final = "reconnect"
 CONF_BUTTONS: Final = "buttons"
-CONF_USE_DEFAULT_LIBS: Final = "use_default_libs"
 
 COMPONENT_CLASS: Final = "Esp32BleKeyboard"
 COMPONENT_NUMBER_CLASS: Final = "Esp32BleKeyboardNumber"

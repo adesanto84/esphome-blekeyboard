@@ -284,19 +284,74 @@ void Esp32BleKeyboard::send_media_report(uint8_t byte0, uint8_t byte1) {
   }
 }
 
+/* --- ASCII -> HID keycode lookup --- */
+struct HidKey {
+  uint8_t modifier;
+  uint8_t key;
+};
+
+static HidKey ascii_to_hid(char c) {
+  if (c >= 'a' && c <= 'z') return {0, (uint8_t)(0x04 + (c - 'a'))};
+  if (c >= 'A' && c <= 'Z') return {0x02, (uint8_t)(0x04 + (c - 'A'))};
+  if (c >= '1' && c <= '9') return {0, (uint8_t)(0x1E + (c - '1'))};
+  if (c == '0') return {0, 0x27};
+  if (c == '\n') return {0, 0x28};
+  if (c == '\r') return {0, 0x28};
+  if (c == '\x1B') return {0, 0x29}; // Escape
+  if (c == '\b') return {0, 0x2A}; // Backspace
+  if (c == '\t') return {0, 0x2B};
+  if (c == ' ') return {0, 0x2C};
+  if (c == '-') return {0, 0x2D};
+  if (c == '_') return {0x02, 0x2D};
+  if (c == '=') return {0, 0x2E};
+  if (c == '+') return {0x02, 0x2E};
+  if (c == '[') return {0, 0x2F};
+  if (c == '{') return {0x02, 0x2F};
+  if (c == ']') return {0, 0x30};
+  if (c == '}') return {0x02, 0x30};
+  if (c == '\\') return {0, 0x31};
+  if (c == '|') return {0x02, 0x31};
+  if (c == ';') return {0, 0x33};
+  if (c == ':') return {0x02, 0x33};
+  if (c == ''') return {0, 0x34};
+  if (c == '"') return {0x02, 0x34};
+  if (c == '`') return {0, 0x35};
+  if (c == '~') return {0x02, 0x35};
+  if (c == ',') return {0, 0x36};
+  if (c == '<') return {0x02, 0x36};
+  if (c == '.') return {0, 0x37};
+  if (c == '>') return {0x02, 0x37};
+  if (c == '/') return {0, 0x38};
+  if (c == '?') return {0x02, 0x38};
+  if (c == '!') return {0x02, 0x1E};
+  if (c == '@') return {0x02, 0x1F};
+  if (c == '#') return {0x02, 0x20};
+  if (c == '$') return {0x02, 0x21};
+  if (c == '%') return {0x02, 0x22};
+  if (c == '^') return {0x02, 0x23};
+  if (c == '&') return {0x02, 0x24};
+  if (c == '*') return {0x02, 0x25};
+  if (c == '(') return {0x02, 0x26};
+  if (c == ')') return {0x02, 0x27};
+  return {0, 0}; // unsupported
+}
+
 void Esp32BleKeyboard::press(std::string message) {
   if (!g_connected) {
     ESP_LOGW(TAG, "Not connected, cannot print");
     return;
   }
-  if (message.length() >= 5) {
-    for (unsigned i = 0; i < message.length(); i += 5) {
-      ESP_LOGD(TAG, "print chunk: %s", message.substr(i, 5).c_str());
-      delay(default_delay_);
+  for (size_t i = 0; i < message.length(); ++i) {
+    HidKey hk = ascii_to_hid(message[i]);
+    if (hk.key == 0) {
+      ESP_LOGW(TAG, "Unsupported character: 0x%02X", (unsigned char)message[i]);
+      continue;
     }
-    return;
+    send_keyboard_report(hk.modifier, hk.key);
+    delay(default_delay_);
+    send_keyboard_report(0, 0); // release
+    delay(default_delay_);
   }
-  ESP_LOGD(TAG, "print: %s", message.c_str());
 }
 
 void Esp32BleKeyboard::press(uint8_t key, bool with_timer) {
