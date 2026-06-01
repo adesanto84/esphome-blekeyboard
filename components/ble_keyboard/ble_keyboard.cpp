@@ -47,7 +47,7 @@ static const uint8_t kHidReportMap[] = {
 
 static uint8_t keyboard_report_[9];  // [Report ID=1, mods, reserved, k1..k6]
 static uint8_t media_report_[3];    // [Report ID=2, byte0, byte1]
-static uint8_t hid_info_[4] = {0x01, 0x01, 0x00, 0x03};
+static uint8_t hid_info_[4] = {0x11, 0x01, 0x00, 0x03};
 static uint8_t protocol_mode_ = 1;
 
 /* --- UUID constants --- */
@@ -283,7 +283,8 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       if (event->connect.status == 0) {
         g_connected = true;
         g_conn_handle = event->connect.conn_handle;
-        ESP_LOGI(TAG, "Connected");
+        ESP_LOGI(TAG, "Connected, initiating security...");
+        ble_gap_security_initiate(g_conn_handle);
       } else {
         ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
       }
@@ -292,6 +293,18 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       g_connected = false;
       g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
       ESP_LOGI(TAG, "Disconnected; reason=%d", event->disconnect.reason);
+      break;
+    case BLE_GAP_EVENT_ENC_CHANGE:
+      ESP_LOGI(TAG, "Encryption changed, status=%d", event->enc_change.status);
+      break;
+    case BLE_GAP_EVENT_REPEAT_PAIRING:
+      ESP_LOGI(TAG, "Repeat pairing; reason=%d", event->repeat_pairing.reason);
+      return BLE_GAP_REPEAT_PAIRING_RETRY;
+    case BLE_GAP_EVENT_PASSKEY_ACTION:
+      ESP_LOGI(TAG, "Passkey action event, action=%d", event->passkey.params.action);
+      if (event->passkey.params.action == BLE_SM_IOACT_NONE) {
+        // Just Works: no user interaction required
+      }
       break;
     case BLE_GAP_EVENT_SUBSCRIBE:
       ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
@@ -318,6 +331,8 @@ static void start_advertising(const char *name) {
   fields.uuids16 = &adv_uuid_hid;
   fields.num_uuids16 = 1;
   fields.uuids16_is_complete = 1;
+  fields.tx_power_level = 0;
+  fields.tx_pwr_lvl_is_present = 1;
 
   int rc = ble_gap_adv_set_fields(&fields);
   if (rc != 0) {
@@ -329,7 +344,7 @@ static void start_advertising(const char *name) {
   adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
   adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
-  rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params, gap_event, NULL);
+  rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, gap_event, NULL);
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_gap_adv_start failed: %d", rc);
   } else {
@@ -391,13 +406,14 @@ void Esp32BleKeyboard::setup() {
     0x01, 0x00,  // Product ID
     0x00, 0x01,  // Product Version
   };
-  // ble_svc_dis_pnp_id_set((const char *)pnp_id);  // disabled: generic PNP may trigger app requirements
+  ble_svc_dis_pnp_id_set((const char *)pnp_id);
   ble_svc_dis_init();
 
   // Security Manager config: enable bonding and Secure Connections (required by Windows for HID)
   ble_hs_cfg.sm_bonding = 1;
   ble_hs_cfg.sm_mitm = 1;
   ble_hs_cfg.sm_sc = 1;
+  ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
