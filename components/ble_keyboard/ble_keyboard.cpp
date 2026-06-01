@@ -317,6 +317,10 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
 }
 
 static void start_advertising(const char *name) {
+  /* Ensure any stale advertising (e.g. boot-time controller packet)
+     is cleared before we publish the correct device name. */
+  ble_gap_adv_stop();
+
   struct ble_gap_adv_params adv_params;
   struct ble_hs_adv_fields fields;
   memset(&fields, 0, sizeof(fields));
@@ -391,8 +395,10 @@ void Esp32BleKeyboard::setup() {
 
   ESP_ERROR_CHECK(nimble_port_init());
 
-  ble_svc_gap_init();
+  /* Set device name BEFORE ble_svc_gap_init() so the GAP service
+     picks up the correct name instead of the default "nimble". */
   ble_svc_gap_device_name_set(g_device_name);
+  ble_svc_gap_init();
   ble_svc_gatt_init();
   ble_svc_bas_init();
 
@@ -416,6 +422,10 @@ void Esp32BleKeyboard::setup() {
   ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
+  // Stop any stale controller-level advertising that may carry the default "nimble" name
+  // before our sync_cb starts the properly-named advertisement.
+  ble_gap_adv_stop();
 
   ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
   ble_hs_cfg.reset_cb = ble_on_reset;
