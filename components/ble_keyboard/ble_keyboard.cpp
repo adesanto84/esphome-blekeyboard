@@ -64,6 +64,7 @@ static const ble_uuid16_t UUID_REPORT_REF       = BLE_UUID16_INIT(0x2908);
 /* --- Report reference data: {Report ID, Report Type} --- */
 static const uint8_t report_ref_keyboard[] = {0x01, 0x01};  // Input
 static const uint8_t report_ref_media[]    = {0x02, 0x01};  // Input
+static const uint8_t report_ref_output[]   = {0x01, 0x02};  // Output
 
 /* --- shared state --- */
 static bool g_connected = false;
@@ -71,8 +72,11 @@ static uint16_t g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t g_handle_keyboard = 0;
 static uint16_t g_handle_media = 0;
 static uint16_t g_handle_boot_input = 0;
+static uint16_t g_handle_output = 0;
+static uint8_t keyboard_output_report_[1] = {0};
 static uint8_t boot_key_report_[8] = {0};
 static uint8_t boot_output_leds_ = 0;
+static char g_device_name[32] = "BLE Keyboard";
 
 /* --- access callback (free function so C GATT tables can reference it) --- */
 static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -112,12 +116,19 @@ static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
         ESP_LOGD(TAG, "Boot Output LED state=0x%02X", boot_output_leds_);
       }
       break;
-    case 0x2A4D:  // HID Report (keyboard or media)
+    case 0x2A4D:  // HID Report
       if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         if (attr_handle == g_handle_keyboard) {
           rc = os_mbuf_append(ctxt->om, keyboard_report_, sizeof(keyboard_report_));
         } else if (attr_handle == g_handle_media) {
           rc = os_mbuf_append(ctxt->om, media_report_, sizeof(media_report_));
+        } else if (attr_handle == g_handle_output) {
+          rc = os_mbuf_append(ctxt->om, keyboard_output_report_, sizeof(keyboard_output_report_));
+        }
+      } else if (ctxt->op == BLE_GATT_ACCESS_OP_WRITE_CHR) {
+        if (attr_handle == g_handle_output) {
+          rc = ble_hs_mbuf_to_flat(ctxt->om, keyboard_output_report_, sizeof(keyboard_output_report_), NULL);
+          ESP_LOGD(TAG, "Keyboard LED output: 0x%02X", keyboard_output_report_[0]);
         }
       }
       break;
@@ -156,6 +167,17 @@ static struct ble_gatt_dsc_def media_report_dscs[] = {
     .min_key_size = 0,
     .access_cb = report_ref_access,
     .arg = (void *)report_ref_media,
+  },
+  { 0 },
+};
+
+static struct ble_gatt_dsc_def output_report_dscs[] = {
+  {
+    .uuid = (const ble_uuid_t *)&UUID_REPORT_REF,
+    .att_flags = BLE_ATT_F_READ,
+    .min_key_size = 0,
+    .access_cb = report_ref_access,
+    .arg = (void *)report_ref_output,
   },
   { 0 },
 };
@@ -233,6 +255,15 @@ static struct ble_gatt_chr_def hid_chrs[] = {
     .min_key_size = 0,
     .val_handle =  &g_handle_media,
   },
+  {
+    .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT,
+    .access_cb =   ble_keyboard_access,
+    .arg =         (void *)3,
+    .descriptors = output_report_dscs,
+    .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE | BLE_GATT_CHR_F_WRITE_NO_RSP,
+    .min_key_size = 0,
+    .val_handle =  &g_handle_output,
+  },
   { 0 },
 };
 
@@ -283,6 +314,10 @@ static void start_advertising(const char *name) {
   fields.name_is_complete = 1;
   fields.appearance = 0x03C1;
   fields.appearance_is_present = 1;
+  static const ble_uuid16_t adv_uuid_hid = BLE_UUID16_INIT(0x1812);
+  fields.uuids16 = &adv_uuid_hid;
+  fields.num_uuids16 = 1;
+  fields.uuids16_is_complete = 1;
 
   int rc = ble_gap_adv_set_fields(&fields);
   if (rc != 0) {
@@ -294,7 +329,7 @@ static void start_advertising(const char *name) {
   adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
   adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
 
-  rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER, &adv_params, gap_event, NULL);
+  rc = ble_gap_adv_start(BLE_OWN_ADDR_RANDOM, NULL, BLE_HS_FOREVER, &adv_params, gap_event, NULL);
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_gap_adv_start failed: %d", rc);
   } else {
@@ -308,7 +343,7 @@ extern "C" void nimble_host_task(void *param) {
   nimble_port_freertos_deinit();
 }
 
-static void ble_on_sync(const char *name) {
+static void ble_on_sync_impl() {
   ESP_LOGI(TAG, "Bluetooth synced");
   int rc = ble_gatts_count_cfg(gatt_services);
   if (rc != 0) {
@@ -320,7 +355,11 @@ static void ble_on_sync(const char *name) {
     ESP_LOGE(TAG, "ble_gatts_add_svcs failed: %d", rc);
     return;
   }
-  start_advertising(name);
+  start_advertising(g_device_name);
+}
+
+static void ble_on_sync_wrapper(void) {
+  ble_on_sync_impl();
 }
 
 static void ble_on_reset(int reason) {
@@ -332,10 +371,13 @@ static void ble_on_reset(int reason) {
 void Esp32BleKeyboard::setup() {
   ESP_LOGI(TAG, "Setting up BLE Keyboard (ESP-IDF NimBLE)");
 
+  strncpy(g_device_name, name_.c_str(), sizeof(g_device_name) - 1);
+  g_device_name[sizeof(g_device_name) - 1] = '\0';
+
   ESP_ERROR_CHECK(nimble_port_init());
 
-  ble_svc_gap_device_name_set(name_.c_str());
   ble_svc_gap_init();
+  ble_svc_gap_device_name_set(g_device_name);
   ble_svc_gatt_init();
   ble_svc_bas_init();
 
@@ -349,15 +391,21 @@ void Esp32BleKeyboard::setup() {
     0x01, 0x00,  // Product ID
     0x00, 0x01,  // Product Version
   };
-  ble_svc_dis_pnp_id_set((const char *)pnp_id);
+  // ble_svc_dis_pnp_id_set((const char *)pnp_id);  // disabled: generic PNP may trigger app requirements
   ble_svc_dis_init();
 
-  ble_hs_cfg.sync_cb = [](void) { ble_on_sync(ble_svc_gap_device_name()); };
+  // Security Manager config: enable bonding and Secure Connections (required by Windows for HID)
+  ble_hs_cfg.sm_bonding = 1;
+  ble_hs_cfg.sm_mitm = 1;
+  ble_hs_cfg.sm_sc = 1;
+  ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+  ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
+
+  ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
   ble_hs_cfg.reset_cb = ble_on_reset;
 
   nimble_port_freertos_init(nimble_host_task);
 }
-
 void Esp32BleKeyboard::update() {
   if (state_sensor_ != nullptr) {
     state_sensor_->publish_state(g_connected);
@@ -516,7 +564,7 @@ void Esp32BleKeyboard::release() {
 void Esp32BleKeyboard::start() {
   if (reconnect_) {
     ble_gap_adv_stop();
-    start_advertising(name_.c_str());
+    start_advertising(g_device_name);
   }
 }
 
