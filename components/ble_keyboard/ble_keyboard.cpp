@@ -582,11 +582,15 @@ void Esp32BleKeyboard::send_keyboard_report(uint8_t modifiers, uint8_t key1, uin
   if (g_handle_keyboard != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
     ESP_LOGI(TAG, "Sending keyboard report: mod=0x%02X k1=0x%02X k2=0x%02X k3=0x%02X k4=0x%02X k5=0x%02X k6=0x%02X",
              modifiers, key1, key2, key3, key4, key5, key6);
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(keyboard_report_, sizeof(keyboard_report_));
+    // IMPORTANT: do NOT include the Report ID byte when sending the
+    // notification. The HID spec for BLE allows the Report ID to be
+    // prepended to read/write, but notifications only carry the report
+    // payload. Windows infers which report is which from the
+    // characteristic handle that received the notification.
+    // Sending 9 bytes (with Report ID) caused Windows to silently
+    // discard the keystroke.
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(&keyboard_report_[1], 8);
     if (om != nullptr) {
-      // ble_gatts_notify_custom: we are the GATT server (peripheral),
-      // pushing a notification to a subscribed client. ble_gattc_* is for
-      // the central/client role, which is not what we want here.
       int rc = ble_gatts_notify_custom(g_conn_handle, g_handle_keyboard, om);
       ESP_LOGI(TAG, "  ble_gatts_notify_custom rc=%d handle=%d conn=%d",
                rc, g_handle_keyboard, g_conn_handle);
@@ -604,7 +608,8 @@ void Esp32BleKeyboard::send_media_report(uint8_t byte0, uint8_t byte1) {
   media_report_[2] = byte1;
 
   if (g_handle_media != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
-    struct os_mbuf *om = ble_hs_mbuf_from_flat(media_report_, sizeof(media_report_));
+    // Same as keyboard: notifications don't carry the Report ID prefix.
+    struct os_mbuf *om = ble_hs_mbuf_from_flat(&media_report_[1], 2);
     if (om != nullptr) {
       ble_gatts_notify_custom(g_conn_handle, g_handle_media, om);
     }
