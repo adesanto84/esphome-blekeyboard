@@ -19,21 +19,33 @@ namespace ble_keyboard {
 
 static const char *const TAG = "ble_keyboard";
 
-/* --- HID Report Map for keyboard (boot compatible) --- */
+/* --- HID Report Map with Report IDs: 1=keyboard, 2=consumer control --- */
 static const uint8_t kHidReportMap[] = {
-    0x05, 0x01,  0x09, 0x06,  0xA1, 0x01,
-    0x05, 0x07,  0x19, 0xE0,  0x29, 0xE7,  0x15, 0x00,  0x25, 0x01,
-    0x75, 0x01,  0x95, 0x08,  0x81, 0x02,
-    0x95, 0x01,  0x75, 0x08,  0x81, 0x01,
-    0x95, 0x05,  0x75, 0x01,  0x05, 0x08,  0x19, 0x01,  0x29, 0x05,
-    0x91, 0x02,  0x95, 0x01,  0x75, 0x03,  0x91, 0x01,
-    0x95, 0x06,  0x75, 0x08,  0x15, 0x00,  0x25, 0xFF,
-    0x05, 0x07,  0x19, 0x00,  0x29, 0xFF,  0x81, 0x00,
+    // Keyboard (Report ID 1)
+    0x05, 0x01, 0x09, 0x06, 0xA1, 0x01,
+    0x85, 0x01,
+    0x05, 0x07, 0x19, 0xE0, 0x29, 0xE7,
+    0x15, 0x00, 0x25, 0x01,
+    0x75, 0x01, 0x95, 0x08, 0x81, 0x02,
+    0x95, 0x01, 0x75, 0x08, 0x81, 0x01,
+    0x95, 0x05, 0x75, 0x01, 0x05, 0x08,
+    0x19, 0x01, 0x29, 0x05, 0x91, 0x02,
+    0x95, 0x01, 0x75, 0x03, 0x91, 0x01,
+    0x95, 0x06, 0x75, 0x08, 0x15, 0x00,
+    0x25, 0xFF, 0x05, 0x07, 0x19, 0x00,
+    0x29, 0xFF, 0x81, 0x00,
+    0xC0,
+    // Consumer Control (Report ID 2)
+    0x05, 0x0C, 0x09, 0x01, 0xA1, 0x01,
+    0x85, 0x02,
+    0x19, 0x00, 0x2A, 0x3C, 0x02,
+    0x15, 0x00, 0x26, 0xFF, 0x03,
+    0x95, 0x01, 0x75, 0x10, 0x81, 0x00,
     0xC0,
 };
 
-static uint8_t keyboard_report_[8];
-static uint8_t media_report_[2];
+static uint8_t keyboard_report_[9];  // [Report ID=1, mods, reserved, k1..k6]
+static uint8_t media_report_[3];    // [Report ID=2, byte0, byte1]
 static uint8_t hid_info_[4] = {0x01, 0x01, 0x00, 0x03};
 static uint8_t protocol_mode_ = 1;
 
@@ -44,6 +56,11 @@ static const ble_uuid16_t UUID_HID_CONTROL_PT   = BLE_UUID16_INIT(0x2A4C);
 static const ble_uuid16_t UUID_HID_REPORT_MAP   = BLE_UUID16_INIT(0x2A4B);
 static const ble_uuid16_t UUID_HID_PROTOCOL     = BLE_UUID16_INIT(0x2A4E);
 static const ble_uuid16_t UUID_HID_REPORT       = BLE_UUID16_INIT(0x2A4D);
+static const ble_uuid16_t UUID_REPORT_REF       = BLE_UUID16_INIT(0x2908);
+
+/* --- Report reference data: {Report ID, Report Type} --- */
+static const uint8_t report_ref_keyboard[] = {0x01, 0x01};  // Input
+static const uint8_t report_ref_media[]    = {0x02, 0x01};  // Input
 
 /* --- shared state --- */
 static bool g_connected = false;
@@ -95,39 +112,90 @@ static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
 }
 
 /* --- GATT service definition --- */
+static int report_ref_access(uint16_t conn_handle, uint16_t attr_handle,
+                              struct ble_gatt_access_ctxt *ctxt, void *arg) {
+  const uint8_t *data = (const uint8_t *)arg;
+  if (ctxt->op == BLE_GATT_ACCESS_OP_READ_DSC) {
+    return os_mbuf_append(ctxt->om, data, 2) == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+  }
+  return BLE_ATT_ERR_UNLIKELY;
+}
+
+static struct ble_gatt_dsc_def keyboard_report_dscs[] = {
+  {
+    .uuid = (const ble_uuid_t *)&UUID_REPORT_REF,
+    .att_flags = BLE_ATT_F_READ,
+    .min_key_size = 0,
+    .access_cb = report_ref_access,
+    .arg = (void *)report_ref_keyboard,
+  },
+  { 0 },
+};
+
+static struct ble_gatt_dsc_def media_report_dscs[] = {
+  {
+    .uuid = (const ble_uuid_t *)&UUID_REPORT_REF,
+    .att_flags = BLE_ATT_F_READ,
+    .min_key_size = 0,
+    .access_cb = report_ref_access,
+    .arg = (void *)report_ref_media,
+  },
+  { 0 },
+};
+
 static struct ble_gatt_chr_def hid_chrs[] = {
   {
     .uuid =        (const ble_uuid_t *)&UUID_HID_INFORMATION,
     .access_cb =   ble_keyboard_access,
+    .arg =         nullptr,
+    .descriptors = nullptr,
     .flags =       BLE_GATT_CHR_F_READ,
+    .min_key_size = 0,
+    .val_handle =  nullptr,
   },
   {
     .uuid =        (const ble_uuid_t *)&UUID_HID_CONTROL_PT,
     .access_cb =   ble_keyboard_access,
+    .arg =         nullptr,
+    .descriptors = nullptr,
     .flags =       BLE_GATT_CHR_F_WRITE_NO_RSP | BLE_GATT_CHR_F_WRITE,
+    .min_key_size = 0,
+    .val_handle =  nullptr,
   },
   {
     .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT_MAP,
     .access_cb =   ble_keyboard_access,
+    .arg =         nullptr,
+    .descriptors = nullptr,
     .flags =       BLE_GATT_CHR_F_READ,
+    .min_key_size = 0,
+    .val_handle =  nullptr,
   },
   {
     .uuid =        (const ble_uuid_t *)&UUID_HID_PROTOCOL,
     .access_cb =   ble_keyboard_access,
+    .arg =         nullptr,
+    .descriptors = nullptr,
     .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP,
+    .min_key_size = 0,
+    .val_handle =  nullptr,
   },
   {
     .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT,
     .access_cb =   ble_keyboard_access,
     .arg =         (void *)1,
+    .descriptors = keyboard_report_dscs,
     .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+    .min_key_size = 0,
     .val_handle =  &g_handle_keyboard,
   },
   {
     .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT,
     .access_cb =   ble_keyboard_access,
     .arg =         (void *)2,
+    .descriptors = media_report_dscs,
     .flags =       BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+    .min_key_size = 0,
     .val_handle =  &g_handle_media,
   },
   { 0 },
@@ -255,14 +323,15 @@ void Esp32BleKeyboard::set_battery_level(uint8_t level) {
 
 void Esp32BleKeyboard::send_keyboard_report(uint8_t modifiers, uint8_t key1, uint8_t key2,
                                              uint8_t key3, uint8_t key4, uint8_t key5, uint8_t key6) {
-  keyboard_report_[0] = modifiers;
-  keyboard_report_[1] = 0;
-  keyboard_report_[2] = key1;
-  keyboard_report_[3] = key2;
-  keyboard_report_[4] = key3;
-  keyboard_report_[5] = key4;
-  keyboard_report_[6] = key5;
-  keyboard_report_[7] = key6;
+  keyboard_report_[0] = 0x01;  // Report ID
+  keyboard_report_[1] = modifiers;
+  keyboard_report_[2] = 0;
+  keyboard_report_[3] = key1;
+  keyboard_report_[4] = key2;
+  keyboard_report_[5] = key3;
+  keyboard_report_[6] = key4;
+  keyboard_report_[7] = key5;
+  keyboard_report_[8] = key6;
 
   if (g_handle_keyboard != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
     struct os_mbuf *om = ble_hs_mbuf_from_flat(keyboard_report_, sizeof(keyboard_report_));
@@ -273,8 +342,9 @@ void Esp32BleKeyboard::send_keyboard_report(uint8_t modifiers, uint8_t key1, uin
 }
 
 void Esp32BleKeyboard::send_media_report(uint8_t byte0, uint8_t byte1) {
-  media_report_[0] = byte0;
-  media_report_[1] = byte1;
+  media_report_[0] = 0x02;  // Report ID
+  media_report_[1] = byte0;
+  media_report_[2] = byte1;
 
   if (g_handle_media != 0 && g_conn_handle != BLE_HS_CONN_HANDLE_NONE) {
     struct os_mbuf *om = ble_hs_mbuf_from_flat(media_report_, sizeof(media_report_));
