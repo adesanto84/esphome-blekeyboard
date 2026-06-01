@@ -313,7 +313,7 @@ static HidKey ascii_to_hid(char c) {
   if (c == '|') return {0x02, 0x31};
   if (c == ';') return {0, 0x33};
   if (c == ':') return {0x02, 0x33};
-  if (c == ''') return {0, 0x34};
+  if (c == '\'') return {0, 0x34};
   if (c == '"') return {0x02, 0x34};
   if (c == '`') return {0, 0x35};
   if (c == '~') return {0x02, 0x35};
