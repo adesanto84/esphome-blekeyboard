@@ -78,7 +78,6 @@ static uint8_t boot_key_report_[8] = {0};
 static uint8_t boot_output_leds_ = 0;
 static char g_device_name[32] = "BLE Keyboard";
 static char g_manufacturer_id[32] = "ESPHome";
-static bool g_advertising_started = false;
 
 /* --- access callback (free function so C GATT tables can reference it) --- */
 static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -297,10 +296,6 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       g_connected = false;
       g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
       ESP_LOGI(TAG, "Disconnected; reason=%d", event->disconnect.reason);
-      if (g_advertising_started) {
-        // Restart advertising after disconnect
-        start_advertising(g_device_name);
-      }
       break;
     case BLE_GAP_EVENT_SUBSCRIBE:
       ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
@@ -343,7 +338,6 @@ static void start_advertising(const char *name) {
     ESP_LOGE(TAG, "ble_gap_adv_start failed: %d", rc);
   } else {
     ESP_LOGI(TAG, "Advertising started with name='%s'", name);
-    g_advertising_started = true;
   }
 }
 
@@ -404,12 +398,13 @@ void Esp32BleKeyboard::setup() {
   strncpy(g_manufacturer_id, manufacturer_id_.c_str(), sizeof(g_manufacturer_id) - 1);
   g_manufacturer_id[sizeof(g_manufacturer_id) - 1] = '\0';
 
-  ESP_ERROR_CHECK(nimble_port_init());
-
-  // CRITICAL: Zero-initialize ble_hs_cfg before populating it.
-  // NimBLE does not zero-initialize this struct automatically on all platforms.
-  // Accessing uninitialized callback pointers causes Store Fault crashes.
-  memset(&ble_hs_cfg, 0, sizeof(ble_hs_cfg));
+  ESP_LOGI(TAG, "Calling nimble_port_init()...");
+  esp_err_t err = nimble_port_init();
+  if (err != ESP_OK) {
+    ESP_LOGE(TAG, "nimble_port_init failed: %d", err);
+    return;
+  }
+  ESP_LOGI(TAG, "nimble_port_init() succeeded");
 
   ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
   ble_hs_cfg.reset_cb = ble_on_reset;
