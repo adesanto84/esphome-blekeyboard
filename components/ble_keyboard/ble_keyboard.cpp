@@ -298,7 +298,7 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       ESP_LOGI(TAG, "Encryption changed, status=%d", event->enc_change.status);
       break;
     case BLE_GAP_EVENT_REPEAT_PAIRING:
-      ESP_LOGI(TAG, "Repeat pairing; reason=%d", event->repeat_pairing.reason);
+      ESP_LOGI(TAG, "Repeat pairing detected, retrying");
       return BLE_GAP_REPEAT_PAIRING_RETRY;
     case BLE_GAP_EVENT_PASSKEY_ACTION:
       ESP_LOGI(TAG, "Passkey action event, action=%d", event->passkey.params.action);
@@ -331,7 +331,7 @@ static void start_advertising(const char *name) {
   fields.uuids16 = &adv_uuid_hid;
   fields.num_uuids16 = 1;
   fields.uuids16_is_complete = 1;
-  fields.tx_power_level = 0;
+  fields.tx_pwr_lvl = 0;
   fields.tx_pwr_lvl_is_present = 1;
 
   int rc = ble_gap_adv_set_fields(&fields);

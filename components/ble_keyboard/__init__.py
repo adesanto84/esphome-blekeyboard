@@ -251,7 +251,7 @@ async def ble_keyboard_combination_to_code(
 
     paren: MockObj = await cg.get_variable(config[CONF_ID])
     var: MockObj = cg.new_Pvariable(action_id, template_arg, paren)
-    template_: LambdaExpression = await cg.templatable(config[CONF_DELAY], args, int)
+    template_: LambdaExpression = await cg.templatable(config[CONF_DELAY], args, cg.uint32)
 
     cg.add(var.set_delay(template_))
     cg.add(var.set_keys([str(key) for key in config[CONF_KEYS]]))
