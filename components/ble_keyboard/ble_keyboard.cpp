@@ -47,8 +47,8 @@ static const uint8_t kHidReportMap[] = {
 
 static uint8_t keyboard_report_[9];  // [Report ID=1, mods, reserved, k1..k6]
 static uint8_t media_report_[3];    // [Report ID=2, byte0, byte1]
-static uint8_t hid_info_[4] = {0x11, 0x01, 0x00, 0x03};
-static uint8_t protocol_mode_ = 0;  // Boot Protocol (0 = Boot, 1 = Report)
+static uint8_t hid_info_[4] = {0x11, 0x01, 0x00, 0x02};  // bcdHID=0x0111, bCountryCode=0, Flags=RemoteWake(0x02)
+static uint8_t protocol_mode_ = 1;  // Report Protocol (0 = Boot, 1 = Report) per HID spec
 
 /* --- UUID constants --- */
 static const ble_uuid16_t UUID_HID_SERVICE      = BLE_UUID16_INIT(0x1812);
@@ -60,6 +60,8 @@ static const ble_uuid16_t UUID_HID_REPORT       = BLE_UUID16_INIT(0x2A4D);
 static const ble_uuid16_t UUID_HID_BOOT_INPUT   = BLE_UUID16_INIT(0x2A22);
 static const ble_uuid16_t UUID_HID_BOOT_OUTPUT  = BLE_UUID16_INIT(0x2A32);
 static const ble_uuid16_t UUID_REPORT_REF       = BLE_UUID16_INIT(0x2908);
+static const ble_uuid16_t UUID_EXT_REPORT_REF   = BLE_UUID16_INIT(0x2907);
+static const ble_uuid16_t UUID_BATTERY_SERVICE  = BLE_UUID16_INIT(0x180F);
 
 /* --- Report reference data: {Report ID, Report Type} --- */
 static const uint8_t report_ref_keyboard[] = {0x01, 0x01};  // Input
@@ -167,6 +169,32 @@ static int report_ref_access(uint16_t conn_handle, uint16_t attr_handle,
   return BLE_ATT_ERR_UNLIKELY;
 }
 
+/* External Report Reference: points to Battery Service (UUID 0x180F) */
+static uint8_t ext_report_ref_battery[2] = {0x0F, 0x18};  // UUID 0x180F little-endian
+static int ext_report_ref_access(uint16_t conn_handle, uint16_t attr_handle,
+                                  struct ble_gatt_access_ctxt *ctxt, void *arg) {
+  (void)conn_handle;
+  (void)attr_handle;
+  (void)arg;
+  if (ctxt->op == BLE_GATT_ACCESS_OP_READ_DSC) {
+    return os_mbuf_append(ctxt->om, ext_report_ref_battery, 2) == 0
+               ? 0
+               : BLE_ATT_ERR_INSUFFICIENT_RES;
+  }
+  return BLE_ATT_ERR_UNLIKELY;
+}
+
+static struct ble_gatt_dsc_def report_map_dscs[] = {
+  {
+    .uuid = (const ble_uuid_t *)&UUID_EXT_REPORT_REF,
+    .att_flags = BLE_ATT_F_READ,
+    .min_key_size = 0,
+    .access_cb = ext_report_ref_access,
+    .arg = nullptr,
+  },
+  { 0 },
+};
+
 static struct ble_gatt_dsc_def keyboard_report_dscs[] = {
   {
     .uuid = (const ble_uuid_t *)&UUID_REPORT_REF,
@@ -223,7 +251,7 @@ static struct ble_gatt_chr_def hid_chrs[] = {
     .uuid =        (const ble_uuid_t *)&UUID_HID_REPORT_MAP,
     .access_cb =   ble_keyboard_access,
     .arg =         nullptr,
-    .descriptors = nullptr,
+    .descriptors = report_map_dscs,
     .flags =       BLE_GATT_CHR_F_READ,
     .min_key_size = 0,
     .val_handle =  nullptr,
