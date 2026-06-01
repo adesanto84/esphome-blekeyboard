@@ -457,6 +457,7 @@ void Esp32BleKeyboard::release() {
 
 void Esp32BleKeyboard::start() {
   if (reconnect_) {
+    ble_gap_adv_stop();
     start_advertising(name_.c_str());
   }
 }
