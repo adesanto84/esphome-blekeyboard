@@ -303,9 +303,14 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
     case BLE_GAP_EVENT_PASSKEY_ACTION:
       ESP_LOGI(TAG, "Passkey action event, action=%d", event->passkey.params.action);
       if (event->passkey.params.action == BLE_SM_IOACT_NONE) {
-        // Just Works: no user interaction required
+        struct ble_sm_io pio = {.action = event->passkey.params.action};
+        ble_sm_inject_io(event->passkey.conn_handle, &pio);
       }
       break;
+    case BLE_GAP_EVENT_IDENTITY_RESOLVED:
+      ESP_LOGI(TAG, "Identity resolved, conn_handle=%d", event->identity_resolved.conn_handle);
+      break;
+
     case BLE_GAP_EVENT_SUBSCRIBE:
       ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
                event->subscribe.cur_notify, event->subscribe.conn_handle);
@@ -415,9 +420,10 @@ void Esp32BleKeyboard::setup() {
   ble_svc_dis_pnp_id_set((const char *)pnp_id);
   ble_svc_dis_init();
 
-  // Security Manager config: enable bonding and Secure Connections (required by Windows for HID)
+  // Security Manager config: Just Works pairing (no MITM) + bonding + SC.
+  // MITM=1 + NO_IO is INVALID: Windows aborts pairing during ceremony enumeration.
   ble_hs_cfg.sm_bonding = 1;
-  ble_hs_cfg.sm_mitm = 1;
+  ble_hs_cfg.sm_mitm = 0;
   ble_hs_cfg.sm_sc = 1;
   ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
