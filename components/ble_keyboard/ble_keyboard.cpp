@@ -78,6 +78,7 @@ static uint8_t boot_key_report_[8] = {0};
 static uint8_t boot_output_leds_ = 0;
 static char g_device_name[32] = "BLE Keyboard";
 static char g_manufacturer_id[32] = "ESPHome";
+static bool g_advertising_started = false;
 
 /* --- access callback (free function so C GATT tables can reference it) --- */
 static int ble_keyboard_access(uint16_t conn_handle, uint16_t attr_handle,
@@ -277,6 +278,9 @@ static struct ble_gatt_svc_def gatt_services[] = {
   { 0 },
 };
 
+/* Forward declaration */
+static void start_advertising(const char *name);
+
 /* --- GAP events --- */
 static int gap_event(struct ble_gap_event *event, void *arg) {
   switch (event->type) {
@@ -284,48 +288,23 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
       if (event->connect.status == 0) {
         g_connected = true;
         g_conn_handle = event->connect.conn_handle;
-        ESP_LOGI(TAG, "Connected (conn_handle=%d), will initiate security after discovery completes", g_conn_handle);
-        // Windows/Android need time to discover GATT services before we initiate bonding.
-        // Initiating security too early causes the host to disconnect (reason=531).
-        // We wait 500ms to let the host read HID Information, Report Map, and DIS.
+        ESP_LOGI(TAG, "Connected (conn_handle=%d)", g_conn_handle);
       } else {
         ESP_LOGI(TAG, "Connection failed, status=%d", event->connect.status);
-      }
-      break;
-    case BLE_GAP_EVENT_SUBSCRIBE:
-      ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d — host ready, initiating security NOW",
-               event->subscribe.cur_notify, event->subscribe.conn_handle);
-      {
-        int rc = ble_gap_security_initiate(event->subscribe.conn_handle);
-        if (rc != 0) {
-          ESP_LOGE(TAG, "ble_gap_security_initiate failed: %d", rc);
-        }
       }
       break;
     case BLE_GAP_EVENT_DISCONNECT:
       g_connected = false;
       g_conn_handle = BLE_HS_CONN_HANDLE_NONE;
       ESP_LOGI(TAG, "Disconnected; reason=%d", event->disconnect.reason);
-      break;
-    case BLE_GAP_EVENT_ENC_CHANGE:
-      if (event->enc_change.status == 0) {
-        ESP_LOGI(TAG, "Encryption established successfully");
-      } else {
-        ESP_LOGE(TAG, "Encryption failed, status=%d", event->enc_change.status);
+      if (g_advertising_started) {
+        // Restart advertising after disconnect
+        start_advertising(g_device_name);
       }
       break;
-    case BLE_GAP_EVENT_REPEAT_PAIRING:
-      ESP_LOGI(TAG, "Repeat pairing detected, retrying");
-      return BLE_GAP_REPEAT_PAIRING_RETRY;
-    case BLE_GAP_EVENT_PASSKEY_ACTION:
-      ESP_LOGI(TAG, "Passkey action event, action=%d", event->passkey.params.action);
-      if (event->passkey.params.action == BLE_SM_IOACT_NONE) {
-        struct ble_sm_io pio = {.action = event->passkey.params.action};
-        ble_sm_inject_io(event->passkey.conn_handle, &pio);
-      }
-      break;
-    case BLE_GAP_EVENT_IDENTITY_RESOLVED:
-      ESP_LOGI(TAG, "Identity resolved, conn_handle=%d", event->identity_resolved.conn_handle);
+    case BLE_GAP_EVENT_SUBSCRIBE:
+      ESP_LOGI(TAG, "Subscribe cur_notify=%d conn_handle=%d",
+               event->subscribe.cur_notify, event->subscribe.conn_handle);
       break;
     default:
       break;
@@ -334,9 +313,6 @@ static int gap_event(struct ble_gap_event *event, void *arg) {
 }
 
 static void start_advertising(const char *name) {
-  /* Ensure any stale advertising is cleared before we publish the correct device name. */
-  ble_gap_adv_stop();
-
   struct ble_gap_adv_params adv_params;
   struct ble_hs_adv_fields fields;
   memset(&fields, 0, sizeof(fields));
@@ -351,10 +327,6 @@ static void start_advertising(const char *name) {
   fields.uuids16 = &adv_uuid_hid;
   fields.num_uuids16 = 1;
   fields.uuids16_is_complete = 1;
-  fields.tx_pwr_lvl = 0;
-  fields.tx_pwr_lvl_is_present = 1;
-
-  ESP_LOGI(TAG, "Starting advertising with name='%s'", name);
 
   int rc = ble_gap_adv_set_fields(&fields);
   if (rc != 0) {
@@ -370,7 +342,8 @@ static void start_advertising(const char *name) {
   if (rc != 0) {
     ESP_LOGE(TAG, "ble_gap_adv_start failed: %d", rc);
   } else {
-    ESP_LOGI(TAG, "Advertising started");
+    ESP_LOGI(TAG, "Advertising started with name='%s'", name);
+    g_advertising_started = true;
   }
 }
 
@@ -440,19 +413,12 @@ void Esp32BleKeyboard::setup() {
   ESP_ERROR_CHECK(nimble_port_init());
 
   // Security Manager config: Just Works pairing (no MITM) + bonding + SC.
-  // MITM=1 + NO_IO is INVALID: Windows aborts pairing during ceremony enumeration.
   ble_hs_cfg.sm_bonding = 1;
   ble_hs_cfg.sm_mitm = 0;
   ble_hs_cfg.sm_sc = 1;
   ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
-
-  // Store callback for handling store overflow events (required for bonding persistence)
-  ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
-
-  // Stop any stale controller-level advertising before our sync_cb starts
-  ble_gap_adv_stop();
 
   ble_hs_cfg.sync_cb = ble_on_sync_wrapper;
   ble_hs_cfg.reset_cb = ble_on_reset;
