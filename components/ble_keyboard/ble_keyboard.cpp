@@ -48,7 +48,7 @@ static const uint8_t kHidReportMap[] = {
 static uint8_t keyboard_report_[9];  // [Report ID=1, mods, reserved, k1..k6]
 static uint8_t media_report_[3];    // [Report ID=2, byte0, byte1]
 static uint8_t hid_info_[4] = {0x11, 0x01, 0x00, 0x03};
-static uint8_t protocol_mode_ = 1;
+static uint8_t protocol_mode_ = 0;  // Boot Protocol (0 = Boot, 1 = Report)
 
 /* --- UUID constants --- */
 static const ble_uuid16_t UUID_HID_SERVICE      = BLE_UUID16_INIT(0x1812);
@@ -402,8 +402,9 @@ static void ble_on_sync_impl() {
   ble_svc_dis_init();
   ble_svc_dis_manufacturer_name_set(g_manufacturer_id);
   ble_svc_dis_model_number_set("BLE Keyboard");
+  // PnP ID: Vendor ID source=0x02 (USB IF), VID=0x1234 (generic), PID=0x0001, Version=0x0001
   static const uint8_t pnp_id[7] = {
-    0x02, 0x5A, 0x04, 0x01, 0x00, 0x00, 0x01,
+    0x02, 0x34, 0x12, 0x01, 0x00, 0x00, 0x01,
   };
   ble_svc_dis_pnp_id_set((const char *)pnp_id);
 
