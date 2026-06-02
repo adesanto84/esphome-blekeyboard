@@ -210,22 +210,8 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
 
     rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
-        ESP_LOGE(TAG, "error setting advertisement data; rc=%d (active=%d)", rc, active);
-        /* If rc=4 (EALREADY) and advertising is NOT active, the NimBLE
-         * slave state is stuck. Force a host reset to clear it. */
-        if (rc == 4 && !active) {
-            ESP_LOGW(TAG, "NimBLE advertising state stuck (rc=4, not active). Forcing host reset...");
-            ble_hs_sched_reset(BLE_HS_ECONTROLLER);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            /* Retry once after reset */
-            rc = ble_gap_adv_set_fields(&fields);
-            if (rc != 0) {
-                ESP_LOGE(TAG, "retry after reset failed; rc=%d", rc);
-                return rc;
-            }
-        } else {
-            return rc;
-        }
+        ESP_LOGE(TAG, "error setting advertisement data; rc=%d", rc);
+        return rc;
     }
     memset(&adv_params, 0, sizeof adv_params);
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
@@ -238,7 +224,6 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
         ESP_LOGE(TAG, "error enabling advertisement; rc=%d", rc);
         return rc;
     }
-    ESP_LOGI(TAG, "advertising started successfully");
     return rc;
 }
 
