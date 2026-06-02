@@ -100,6 +100,12 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
     ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ID | BLE_SM_PAIR_KEY_DIST_ENC;
     ble_hs_cfg.sm_their_key_dist |= BLE_SM_PAIR_KEY_DIST_ID | BLE_SM_PAIR_KEY_DIST_ENC;
 
+    /* Also set the GAP Device Name characteristic (0x2A00) so that the
+     * operating system reads the user-configured name after pairing, not the
+     * NimBLE default ("nimble"). Windows uses this characteristic for the
+     * display name in "Devices and Printers". */
+    ble_svc_gap_device_name_set(device_name);
+
     return ESP_OK;
 }
 
@@ -200,7 +206,7 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
     /* Advertise indefinitely. A HID keyboard must remain discoverable
      * while disconnected; the 180s default would silently stop
      * advertising and leave the device invisible. */
-    int32_t adv_duration_ms = 0;
+    int32_t adv_duration_ms = BLE_HS_FOREVER;
     uint8_t own_addr_type = BLE_OWN_ADDR_PUBLIC;
 
     rc = ble_gap_adv_set_fields(&fields);
