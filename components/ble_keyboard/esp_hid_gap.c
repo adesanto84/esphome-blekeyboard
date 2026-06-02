@@ -211,6 +211,11 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
     /* Maximum possible duration for hid device (180s). */
     int32_t adv_duration_ms = 180000;
 
+    /* If a previous advertising session is still active (e.g. after a host
+     * reset + re-sync), ble_gap_adv_set_fields returns BLE_HS_EALREADY.
+     * Stop advertising first so we can reconfigure and restart safely. */
+    ble_gap_adv_stop();
+
     rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "error setting advertisement data; rc=%d", rc);
