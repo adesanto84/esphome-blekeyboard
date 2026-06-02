@@ -79,6 +79,17 @@ static void hidd_event_handler(void *handler_args, esp_event_base_t base, int32_
   esp_hidd_event_data_t *param = (esp_hidd_event_data_t *) event_data;
 
   switch (event) {
+    case ESP_HIDD_START_EVENT:
+      // The NimBLE host has finished its sync and the GATT service table has
+      // been registered. This is the FIRST safe moment to call
+      // esp_hid_ble_gap_adv_start(): inside the vendored esp_hid_gap.c the
+      // function dispatches to ble_gap_adv_set_fields() which returns
+      // BLE_HS_EDISABLED (rc=30) if the host is not yet enabled. We MUST
+      // start advertising here, not from setup(), mirroring the official
+      // esp_hid_device example.
+      ESP_LOGI(TAG, "HID device stack started; advertising now");
+      esp_hid_ble_gap_adv_start();
+      break;
     case ESP_HIDD_CONNECT_EVENT:
       g_connected = true;
       ESP_LOGI(TAG, "HID device connected");
@@ -87,6 +98,7 @@ static void hidd_event_handler(void *handler_args, esp_event_base_t base, int32_
       g_connected = false;
       ESP_LOGI(TAG, "HID device disconnected; reason=%d", param->disconnect.reason);
       // Re-start advertising so a fresh connection can be made without a power cycle.
+      // The host is by now fully up, so this call is safe.
       esp_hid_ble_gap_adv_start();
       break;
     case ESP_HIDD_OUTPUT_EVENT:
@@ -172,22 +184,20 @@ void Esp32BleKeyboard::setup() {
   // loses the LTK and the next connect hits the AUTHREQ loop.
   ble_store_config_init();
 
-  // Step 7: start advertising.
-  err = esp_hid_ble_gap_adv_start();
-  if (err != 0) {
-    ESP_LOGE(TAG, "esp_hid_ble_gap_adv_start failed: %d", err);
-    return;
-  }
-  ESP_LOGI(TAG, "Advertising started with name='%s'", g_device_name);
-
-  // Step 8: start the NimBLE host task. esp_hid_gap_init() does NOT call
+  // Step 7: start the NimBLE host task. esp_hid_gap_init() does NOT call
   // esp_nimble_enable() for us (it only initialises the controller and the
-  // NimBLE port). We start the host task here, mirroring the official
-  // esp_hid_device example.
+  // NimBLE port). The host task runs nimble_port_run(); once it finishes the
+  // host-controller sync, esp_hid posts ESP_HIDD_START_EVENT, and our
+  // hidd_event_handler() calls esp_hid_ble_gap_adv_start() from there.
+  //
+  // We MUST NOT call esp_hid_ble_gap_adv_start() here: ble_gap_adv_set_fields
+  // returns BLE_HS_EDISABLED (rc=30) when the host has not yet been enabled.
   err = esp_nimble_enable(reinterpret_cast<void *>(nimble_host_task));
   if (err != ESP_OK) {
     ESP_LOGE(TAG, "esp_nimble_enable failed: %d", err);
+    return;
   }
+  ESP_LOGI(TAG, "NimBLE host task started; advertising will begin on host sync");
 }
 
 void Esp32BleKeyboard::update() {
