@@ -196,16 +196,16 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
     struct ble_gap_adv_params adv_params;
     /* Maximum possible duration for hid device (180s). */
     int32_t adv_duration_ms = 180000;
+    uint8_t own_addr_type = BLE_OWN_ADDR_PUBLIC;
 
-    /* If a previous advertising session is still active (e.g. after a host
-     * reset + re-sync), ble_gap_adv_set_fields returns BLE_HS_EALREADY.
-     * Stop advertising first so we can reconfigure and restart safely. */
-    int active = ble_gap_adv_active();
-    ESP_LOGI(TAG, "ble_gap_adv_active=%d, attempting start", active);
-    if (active) {
-        rc = ble_gap_adv_stop();
-        ESP_LOGI(TAG, "ble_gap_adv_stop() rc=%d", rc);
-        vTaskDelay(pdMS_TO_TICKS(50));
+    /* Infer the BLE address before starting advertising.  This is the
+     * same pattern used by the reference implementation
+     * (olegos76/nimble_kbdhid_example).  Without it ble_gap_adv_set_fields
+     * may return BLE_HS_EALREADY (rc=4) on a fresh boot. */
+    rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "ble_hs_id_infer_auto failed; rc=%d", rc);
+        return rc;
     }
 
     rc = ble_gap_adv_set_fields(&fields);
@@ -218,7 +218,7 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
     adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(30);
     adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(50);
-    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, adv_duration_ms,
+    rc = ble_gap_adv_start(own_addr_type, NULL, adv_duration_ms,
                            &adv_params, nimble_hid_gap_event, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "error enabling advertisement; rc=%d", rc);
