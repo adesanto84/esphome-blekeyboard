@@ -325,6 +325,17 @@ void Esp32BleKeyboard::press(std::string message) {
   }
 }
 
+/* --- Modifier dispatch helper --- */
+static bool is_modifier(uint8_t key) {
+  switch (key) {
+    case 0x01: case 0x02: case 0x04: case 0x08:
+    case 0x10: case 0x20: case 0x40: case 0x80:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void Esp32BleKeyboard::press(uint8_t key, bool with_timer) {
   if (!g_connected) {
     ESP_LOGW(TAG, "Not connected, cannot press key");
@@ -333,7 +344,11 @@ void Esp32BleKeyboard::press(uint8_t key, bool with_timer) {
   if (with_timer) {
     update_timer();
   }
-  send_keyboard_report(0, key);
+  if (is_modifier(key)) {
+    send_keyboard_report(key, 0);
+  } else {
+    send_keyboard_report(0, key);
+  }
 }
 
 void Esp32BleKeyboard::press(MediaKeyReport key, bool with_timer) {
