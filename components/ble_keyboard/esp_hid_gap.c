@@ -70,8 +70,10 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
     fields.appearance = appearance;
     fields.appearance_is_present = 1;
 
-    fields.tx_pwr_lvl_is_present = 1;
-    fields.tx_pwr_lvl = BLE_HS_ADV_TX_PWR_LVL_AUTO;
+    /* TX power removed: saves 4 bytes in the 31-byte ADV payload.
+     * The BLE_HS_EMSGSIZE (rc=4) error was caused by the combined size of
+     * flags + UUID + tx power + appearance + device_name exceeding the
+     * HCI advertising data limit.  TX power is optional for HID devices. */
 
     fields.name = (uint8_t *)device_name;
     fields.name_len = strlen(device_name);
