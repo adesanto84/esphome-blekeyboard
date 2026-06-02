@@ -61,6 +61,7 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
 
     /* Flags: general discoverable + BLE-only (BR/EDR unsupported). */
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
+    fields.flags_is_present = 1;
 
     /* The example uses ESP_HID_APPEARANCE_GENERIC here, but the
      * ble_keyboard component passes ESP_HID_APPEARANCE_KEYBOARD through
@@ -200,12 +201,32 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
     /* If a previous advertising session is still active (e.g. after a host
      * reset + re-sync), ble_gap_adv_set_fields returns BLE_HS_EALREADY.
      * Stop advertising first so we can reconfigure and restart safely. */
-    ble_gap_adv_stop();
+    int active = ble_gap_adv_active();
+    ESP_LOGI(TAG, "ble_gap_adv_active=%d, attempting start", active);
+    if (active) {
+        rc = ble_gap_adv_stop();
+        ESP_LOGI(TAG, "ble_gap_adv_stop() rc=%d", rc);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
 
     rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
-        ESP_LOGE(TAG, "error setting advertisement data; rc=%d", rc);
-        return rc;
+        ESP_LOGE(TAG, "error setting advertisement data; rc=%d (active=%d)", rc, active);
+        /* If rc=4 (EALREADY) and advertising is NOT active, the NimBLE
+         * slave state is stuck. Force a host reset to clear it. */
+        if (rc == 4 && !active) {
+            ESP_LOGW(TAG, "NimBLE advertising state stuck (rc=4, not active). Forcing host reset...");
+            ble_hs_sched_reset(BLE_HS_ECONTROLLER);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            /* Retry once after reset */
+            rc = ble_gap_adv_set_fields(&fields);
+            if (rc != 0) {
+                ESP_LOGE(TAG, "retry after reset failed; rc=%d", rc);
+                return rc;
+            }
+        } else {
+            return rc;
+        }
     }
     memset(&adv_params, 0, sizeof adv_params);
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
@@ -218,6 +239,7 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
         ESP_LOGE(TAG, "error enabling advertisement; rc=%d", rc);
         return rc;
     }
+    ESP_LOGI(TAG, "advertising started successfully");
     return rc;
 }
 

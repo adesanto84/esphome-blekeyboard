@@ -87,8 +87,24 @@ static void hidd_event_handler(void *handler_args, esp_event_base_t base, int32_
       // BLE_HS_EDISABLED (rc=30) if the host is not yet enabled. We MUST
       // start advertising here, not from setup(), mirroring the official
       // esp_hid_device example.
-      ESP_LOGI(TAG, "HID device stack started; advertising now");
-      esp_hid_ble_gap_adv_start();
+      {
+        int retry_count = 0;
+        const int max_retries = 5;
+        esp_err_t err;
+        do {
+          ESP_LOGI(TAG, "HID device stack started; advertising now (attempt %d)", retry_count + 1);
+          err = esp_hid_ble_gap_adv_start();
+          if (err == ESP_OK) {
+            break;
+          }
+          ESP_LOGW(TAG, "Advertising start failed, rc=%d. Retrying in 100ms...", err);
+          vTaskDelay(pdMS_TO_TICKS(100));
+          retry_count++;
+        } while (retry_count < max_retries);
+        if (err != ESP_OK) {
+          ESP_LOGE(TAG, "Failed to start advertising after %d attempts. rc=%d", max_retries, err);
+        }
+      }
       break;
     case ESP_HIDD_CONNECT_EVENT:
       g_connected = true;
