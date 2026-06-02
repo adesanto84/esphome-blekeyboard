@@ -1,0 +1,39 @@
+# Kconfig.projbuild for the ble_keyboard component
+#
+# Adding this component to an ESP-IDF project (with framework-espidf and
+# the NimBLE host) auto-selects the options that the `esp_hid` component
+# needs to compile the NimBLE backend of esp_hidd_dev_init.
+#
+# The relevant symbols are:
+#   - esp_hid_dev_init (in esp_hid/src/esp_hidd.c) dispatches to either
+#     esp_ble_hidd_dev_init (NimBLE backend in esp_hid/src/nimble_hidd.c)
+#     or esp_bt_hidd_dev_init (Bluedroid backend in esp_hid/src/bt_hidd.c).
+#   - The NimBLE implementation is gated by `CONFIG_BT_NIMBLE_HID_SERVICE`
+#     in nimble_hidd.c itself: the entire body of esp_ble_hidd_dev_init
+#     is wrapped in `#if CONFIG_BT_NIMBLE_HID_SERVICE`.
+#   - The esp_hid component's CMakeLists.txt adds nimble_hidd.c to its
+#     source list when `CONFIG_BT_NIMBLE_ENABLED` is set, but does NOT
+#     enable the HID service itself; that has to be set by the user (or
+#     by this Kconfig) explicitly.
+#
+# Without CONFIG_BT_NIMBLE_HID_SERVICE=y, the linker fails with:
+#   undefined reference to `esp_ble_hidd_dev_init'
+#
+# This Kconfig lets the ble_keyboard component pull in the option it
+# needs, the same way the esp_hid_device example does it
+# (examples/bluetooth/esp_hid_device/main/Kconfig.projbuild).
+
+menu "BLE Keyboard component"
+
+    config BLE_KEYBOARD_ENABLED
+        bool "Enable BLE Keyboard HID device"
+        default y
+        depends on BT_NIMBLE_ENABLED
+        select BT_NIMBLE_HID_SERVICE
+        help
+            Enables the BLE Keyboard component. Selecting this option
+            also auto-enables the NimBLE HID service so that the
+            esp_hid device library has a NimBLE backend compiled in
+            and the symbol `esp_ble_hidd_dev_init` is defined.
+
+endmenu

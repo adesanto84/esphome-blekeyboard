@@ -9,7 +9,7 @@ import esphome.config_validation as cv
 from esphome import automation
 from esphome.automation import maybe_simple_id
 from esphome.components import binary_sensor, button, number
-from esphome.components.esp32 import include_builtin_idf_component
+from esphome.components.esp32 import add_idf_sdkconfig_option, include_builtin_idf_component
 from esphome.const import (
     CONF_BATTERY_LEVEL,
     CONF_CODE,
@@ -79,6 +79,25 @@ async def to_code(config: dict) -> None:
     # from the ESPHome ESP-IDF build by default to keep the binary small.
     # We use it for the BLE keyboard implementation, so un-exclude it.
     include_builtin_idf_component("esp_hid")
+
+    # The esp_hid device library dispatches esp_hidd_dev_init to a NimBLE
+    # backend (esp_ble_hidd_dev_init, in esp_hid/src/nimble_hidd.c) or a
+    # Bluedroid backend (esp_bt_hidd_dev_init, in esp_hid/src/bt_hidd.c).
+    # The NimBLE backend is the one we want, but the entire body of
+    # esp_ble_hidd_dev_init is wrapped in `#if CONFIG_BT_NIMBLE_HID_SERVICE`,
+    # so without that option set the linker fails with:
+    #
+    #   undefined reference to `esp_ble_hidd_dev_init'
+    #
+    # We force the option here (in addition to the user's yaml
+    # sdkconfig_options) so a missing entry in the yaml does not break
+    # the build. The component's Kconfig.projbuild does the same thing
+    # for plain PlatformIO + ESP-IDF projects that don't go through
+    # ESPHome's `add_idf_sdkconfig_option` path.
+    add_idf_sdkconfig_option("CONFIG_BT_ENABLED", True)
+    add_idf_sdkconfig_option("CONFIG_BT_BLE_ENABLED", True)
+    add_idf_sdkconfig_option("CONFIG_BT_NIMBLE_ENABLED", True)
+    add_idf_sdkconfig_option("CONFIG_BT_NIMBLE_HID_SERVICE", True)
 
     var = cg.new_Pvariable(
         config[CONF_ID],
