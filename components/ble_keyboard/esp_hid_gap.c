@@ -198,21 +198,6 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
     int32_t adv_duration_ms = 180000;
     uint8_t own_addr_type = BLE_OWN_ADDR_PUBLIC;
 
-    /* Resolve the BLE address before starting advertising.  The reference
-     * implementation (olegos76/nimble_kbdhid_example) does this in its
-     * sync_cb.  Without it ble_gap_adv_set_fields may return rc=4. */
-    rc = ble_hs_id_infer_auto(0, &own_addr_type);
-    if (rc != 0) {
-        ESP_LOGE(TAG, "ble_hs_id_infer_auto failed; rc=%d", rc);
-        return rc;
-    }
-
-    /* If advertising was previously started and is still active (or
-     * preempted by WiFi coexistence), ble_gap_adv_set_fields returns
-     * BLE_HS_EALREADY.  Force a stop first to clear the slave state. */
-    ble_gap_adv_stop();
-    vTaskDelay(pdMS_TO_TICKS(50));
-
     rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
         ESP_LOGE(TAG, "error setting advertisement data; rc=%d", rc);
@@ -223,7 +208,7 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
     adv_params.disc_mode = BLE_GAP_DISC_MODE_GEN;
     adv_params.itvl_min = BLE_GAP_ADV_ITVL_MS(30);
     adv_params.itvl_max = BLE_GAP_ADV_ITVL_MS(50);
-    rc = ble_gap_adv_start(own_addr_type, NULL, adv_duration_ms,
+    rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, adv_duration_ms,
                            &adv_params, nimble_hid_gap_event, NULL);
     if (rc != 0) {
         ESP_LOGE(TAG, "error enabling advertisement; rc=%d", rc);

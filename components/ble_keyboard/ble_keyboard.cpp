@@ -184,6 +184,7 @@ void Esp32BleKeyboard::setup() {
   // Step 6: enable NimBLE's bond store backed by NVS. Without this, a reboot
   // loses the LTK and the next connect hits the AUTHREQ loop.
   ble_store_config_init();
+  ble_hs_cfg.store_status_cb = ble_store_util_status_rr;
 
   // Step 7: start the NimBLE host task. esp_hid_gap_init() does NOT call
   // esp_nimble_enable() for us (it only initialises the controller and the
