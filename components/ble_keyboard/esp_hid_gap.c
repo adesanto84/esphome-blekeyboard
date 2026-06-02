@@ -196,8 +196,10 @@ esp_err_t esp_hid_ble_gap_adv_start(void)
 {
     int rc;
     struct ble_gap_adv_params adv_params;
-    /* Maximum possible duration for hid device (180s). */
-    int32_t adv_duration_ms = 180000;
+    /* Advertise indefinitely. A HID keyboard must remain discoverable
+     * while disconnected; the 180s default would silently stop
+     * advertising and leave the device invisible. */
+    int32_t adv_duration_ms = 0;
     uint8_t own_addr_type = BLE_OWN_ADDR_PUBLIC;
 
     rc = ble_gap_adv_set_fields(&fields);
