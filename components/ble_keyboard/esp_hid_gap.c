@@ -62,11 +62,10 @@ __attribute__((weak)) void ble_hid_task_start_up(void) {
 }
 
 static struct ble_hs_adv_fields fields;
+static ble_uuid16_t s_hid_uuid16;
 
 esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
 {
-    ble_uuid16_t *uuid16, *uuid16_1;
-
     memset(&fields, 0, sizeof fields);
 
     /* Flags: general discoverable + BLE-only (BR/EDR unsupported). */
@@ -87,15 +86,11 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
     fields.name_len = strlen(device_name);
     fields.name_is_complete = 1;
 
-    uuid16 = (ble_uuid16_t *)malloc(sizeof(ble_uuid16_t));
-    if (uuid16 == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
-    uuid16_1 = (ble_uuid16_t[]) {
-        BLE_UUID16_INIT(GATT_SVR_SVC_HID_UUID)
-    };
-    memcpy(uuid16, uuid16_1, sizeof(ble_uuid16_t));
-    fields.uuids16 = uuid16;
+    memset(&s_hid_uuid16, 0, sizeof(s_hid_uuid16));
+    s_hid_uuid16.u.type = BLE_UUID_TYPE_16;
+    s_hid_uuid16.value = GATT_SVR_SVC_HID_UUID;
+
+    fields.uuids16 = &s_hid_uuid16;
     fields.num_uuids16 = 1;
     fields.uuids16_is_complete = 1;
 
