@@ -102,6 +102,7 @@ docker run --rm -v "$(pwd):/config" esphome/esphome:latest \
 - Do not assume `esp_hid` headers are automatically available; `include_builtin_idf_component` is required.
 - Do not introduce `esp_bt_controller_mem_release` failure workarounds that rely on `#if CONFIG_BT_CLASSIC_ENABLED`; use error-code filtering instead (see C3/C6/H2 constraint below).
 - Do not delete bonds from the ESP side alone during debugging. **Windows keeps its own bond copy**; deleting from the ESP only causes an AUTHREQ reconnect loop (`status=7` → delete → reconnect → `status=7`). See "Debugging bond issues" below.
+- Do not use upstream MyNewt NimBLE error code values to decode an `rc` from the ESP-IDF fork. See "NimBLE error codes differ from upstream MyNewt" below.
 
 ## Board-specific gotchas
 
@@ -115,6 +116,35 @@ if (ret != ESP_OK && ret != ESP_ERR_NOT_SUPPORTED) {
 }
 ```
 Using `#if CONFIG_BT_CLASSIC_ENABLED` was rejected as an alternative because Kconfig can claim Classic BT is enabled on a chip that physically lacks it.
+
+### NimBLE error codes differ from upstream MyNewt
+The NimBLE fork shipped with ESP-IDF 5.5.4 uses **different error code values** than the upstream Apache MyNewt NimBLE. Do not look at upstream `ble_hs.h` to decode an `rc` value — always check the header cache downloaded by ESPHome:
+```bash
+find .esphome -path '*/ble_hs.h' | head -1
+```
+In the **real** ESP-IDF 5.5.4 cache:
+```c
+#define BLE_HS_EALREADY     2   // NOT 4!
+#define BLE_HS_EMSGSIZE     4   // This is rc=4
+```
+We spent ~10 fixes chasing `rc=4` as if it were `BLE_HS_EALREADY` ("advertising already active"). It was actually `BLE_HS_EMSGSIZE` ("message too long").
+
+### BLE advertising payload size limit (31 bytes)
+Legacy BLE advertising data is capped at **31 bytes** (`BLE_HCI_MAX_ADV_DATA_LEN`). Every field in `ble_hs_adv_fields` costs `2 (header: len+type) + data_len` bytes.
+
+Our original `esp_hid_ble_gap_adv_init()` included:
+- Flags (3 bytes)
+- 16-bit HID UUID (4 bytes)
+- TX Power (4 bytes)
+- Appearance (4 bytes)
+- Device name "MyBleKeyboard" (16 bytes)
+- **Total ≈ 31 bytes** — over the limit depending on exact padding.
+
+This caused `ble_gap_adv_set_fields()` to return `BLE_HS_EMSGSIZE` (rc=4) on every call, making the device invisible to scanners.
+
+**Fix applied in commit `fde7e37`:** removed `tx_pwr_lvl` from the ADV payload, saving 4 bytes and bringing the total to ~27 bytes (safely under the 31-byte limit). TX power is optional for HID devices and can be omitted.
+
+If you need longer device names, move the name to the **Scan Response** (`ble_gap_adv_rsp_set_fields`) instead of the primary ADV packet.
 
 ## Debugging bond issues
 
