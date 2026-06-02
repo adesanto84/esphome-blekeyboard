@@ -28,7 +28,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/semphr.h"
 
 #include "esp_hid_gap.h"
 #include "host/ble_hs.h"
@@ -39,14 +38,6 @@
 #include "host/ble_sm.h"
 
 static const char *TAG = "ESP_HID_GAP";
-
-static SemaphoreHandle_t bt_hidh_cb_semaphore = NULL;
-#define WAIT_BT_CB() xSemaphoreTake(bt_hidh_cb_semaphore, portMAX_DELAY)
-#define SEND_BT_CB() xSemaphoreGive(bt_hidh_cb_semaphore)
-
-static SemaphoreHandle_t ble_hidh_cb_semaphore = NULL;
-#define WAIT_BLE_CB() xSemaphoreTake(ble_hidh_cb_semaphore, portMAX_DELAY)
-#define SEND_BLE_CB() xSemaphoreGive(ble_hidh_cb_semaphore)
 
 #define GATT_SVR_SVC_HID_UUID 0x1812
 
@@ -294,16 +285,6 @@ esp_err_t esp_hid_gap_deinit(void)
         ESP_LOGE(TAG, "deinit_low_level failed: %d", ret);
     }
 
-    if (bt_hidh_cb_semaphore != NULL) {
-        vSemaphoreDelete(bt_hidh_cb_semaphore);
-        bt_hidh_cb_semaphore = NULL;
-    }
-
-    if (ble_hidh_cb_semaphore != NULL) {
-        vSemaphoreDelete(ble_hidh_cb_semaphore);
-        ble_hidh_cb_semaphore = NULL;
-    }
-
     return ESP_OK;
 }
 
@@ -315,31 +296,8 @@ esp_err_t esp_hid_gap_init(uint8_t mode)
         return ESP_FAIL;
     }
 
-    if (bt_hidh_cb_semaphore != NULL) {
-        ESP_LOGE(TAG, "Already initialised");
-        return ESP_FAIL;
-    }
-
-    bt_hidh_cb_semaphore = xSemaphoreCreateBinary();
-    if (bt_hidh_cb_semaphore == NULL) {
-        ESP_LOGE(TAG, "xSemaphoreCreateMutex failed!");
-        return ESP_FAIL;
-    }
-
-    ble_hidh_cb_semaphore = xSemaphoreCreateBinary();
-    if (ble_hidh_cb_semaphore == NULL) {
-        ESP_LOGE(TAG, "xSemaphoreCreateMutex failed!");
-        vSemaphoreDelete(bt_hidh_cb_semaphore);
-        bt_hidh_cb_semaphore = NULL;
-        return ESP_FAIL;
-    }
-
     ret = init_low_level(mode);
     if (ret != ESP_OK) {
-        vSemaphoreDelete(bt_hidh_cb_semaphore);
-        bt_hidh_cb_semaphore = NULL;
-        vSemaphoreDelete(ble_hidh_cb_semaphore);
-        ble_hidh_cb_semaphore = NULL;
         return ret;
     }
 
