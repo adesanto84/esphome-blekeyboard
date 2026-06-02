@@ -59,18 +59,7 @@ template<typename... Ts> class Esp32BleKeyboardCombinationAction : public Action
 
   void play(Ts... x) override {
     uint32_t delay_ms = this->delay_.value(x...);
-
-    for (std::string &key : keys_) {
-      if (this->is_number(key)) {
-        this->ble_keyboard_->press((uint8_t) atoi(key.c_str()), false);
-      } else {
-        this->ble_keyboard_->press(key);
-      }
-
-      delay(delay_ms);
-    }
-
-    this->ble_keyboard_->release();
+    this->ble_keyboard_->press_combination(keys_, delay_ms);
   }
 
   void set_keys(const std::vector<std::string> &keys) { keys_ = keys; }
@@ -78,11 +67,6 @@ template<typename... Ts> class Esp32BleKeyboardCombinationAction : public Action
  protected:
   std::vector<std::string> keys_;
   Esp32BleKeyboard *ble_keyboard_;
-
- private:
-  bool is_number(const std::string &s) {
-    return !s.empty() && std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isdigit(c); }) == s.end();
-  }
 };
 
 template<typename... Ts> class Esp32BleKeyboardStartAction : public Action<Ts...> {

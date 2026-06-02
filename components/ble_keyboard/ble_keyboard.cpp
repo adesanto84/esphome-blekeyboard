@@ -2,6 +2,8 @@
 
 #include "ble_keyboard.h"
 #include "esphome/core/log.h"
+#include <cctype>
+#include <vector>
 
 /* NimBLE host task helpers */
 #include "nimble/nimble_port.h"
@@ -360,6 +362,51 @@ void Esp32BleKeyboard::press(MediaKeyReport key, bool with_timer) {
     update_timer();
   }
   send_media_report(key[0], key[1]);
+}
+
+void Esp32BleKeyboard::press_combination(const std::vector<std::string> &keys, uint32_t hold_ms) {
+  if (!g_connected) {
+    ESP_LOGW(TAG, "Not connected, cannot press combination");
+    return;
+  }
+
+  uint8_t modifiers = 0;
+  uint8_t keycodes[6] = {0};
+  size_t key_idx = 0;
+
+  for (const std::string &key_str : keys) {
+    uint8_t key_val = 0;
+    bool is_str_key = true;
+
+    if (key_str.length() == 1) {
+      HidKey hk = ascii_to_hid(key_str[0]);
+      if (hk.key != 0) {
+        key_val = hk.key;
+        modifiers |= hk.modifier;
+      }
+    } else if (!key_str.empty() && std::isdigit(static_cast<unsigned char>(key_str[0]))) {
+      key_val = static_cast<uint8_t>(atoi(key_str.c_str()));
+      is_str_key = false;
+    }
+
+    if (key_val == 0) {
+      continue;
+    }
+
+    if (!is_str_key && is_modifier(key_val)) {
+      modifiers |= key_val;
+    } else if (key_idx < 6) {
+      keycodes[key_idx++] = key_val;
+    }
+  }
+
+  send_keyboard_report(modifiers, keycodes[0], keycodes[1], keycodes[2],
+                       keycodes[3], keycodes[4], keycodes[5]);
+
+  if (hold_ms > 0) {
+    cancel_timeout(TAG);
+    set_timeout(TAG, hold_ms, [this]() { this->release(); });
+  }
 }
 
 void Esp32BleKeyboard::release() {

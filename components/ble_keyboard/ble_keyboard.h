@@ -5,6 +5,7 @@
 #include "esphome/core/component.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include <string>
+#include <vector>
 
 namespace esphome {
 namespace ble_keyboard {
@@ -35,6 +36,7 @@ class Esp32BleKeyboard : public PollingComponent {
   void press(std::string message);
   void press(uint8_t key, bool with_timer = true);
   void press(MediaKeyReport key, bool with_timer = true);
+  void press_combination(const std::vector<std::string> &keys, uint32_t hold_ms);
   void release();
 
   void start();
