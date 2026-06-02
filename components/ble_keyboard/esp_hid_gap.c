@@ -240,7 +240,7 @@ static esp_err_t init_low_level(uint8_t mode)
     bt_cfg.mode = mode;
 #endif
     ret = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
-    if (ret) {
+    if (ret != ESP_OK && ret != ESP_ERR_NOT_SUPPORTED) {
         ESP_LOGE(TAG, "esp_bt_controller_mem_release failed: %d", ret);
         return ret;
     }
