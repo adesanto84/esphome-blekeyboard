@@ -61,6 +61,11 @@ static char g_manufacturer_id[32] = "ESPHome";
 /* Handle to the esp_hid device. Populated by esp_hidd_dev_init. */
 static esp_hidd_dev_t *s_hid_dev = NULL;
 
+/* Startup delay counter. Set by ESP_HIDD_START_EVENT; decremented in
+ * update(). Advertising starts only when this reaches 0. This gives NimBLE
+ * time to fully initialise and avoids rc=4 / EALREADY races. */
+static int s_advertising_startup_delay = 0;
+
 /* `ble_store_config_init` lives in NimBLE's store/config source. The header
  * tree does not export it, so we forward-declare it here, mirroring the
  * approach used by the official esp_hid_device example. */
@@ -81,30 +86,13 @@ static void hidd_event_handler(void *handler_args, esp_event_base_t base, int32_
   switch (event) {
     case ESP_HIDD_START_EVENT:
       // The NimBLE host has finished its sync and the GATT service table has
-      // been registered. This is the FIRST safe moment to call
-      // esp_hid_ble_gap_adv_start(): inside the vendored esp_hid_gap.c the
-      // function dispatches to ble_gap_adv_set_fields() which returns
-      // BLE_HS_EDISABLED (rc=30) if the host is not yet enabled. We MUST
-      // start advertising here, not from setup(), mirroring the official
-      // esp_hid_device example.
-      {
-        int retry_count = 0;
-        const int max_retries = 5;
-        esp_err_t err;
-        do {
-          ESP_LOGI(TAG, "HID device stack started; advertising now (attempt %d)", retry_count + 1);
-          err = esp_hid_ble_gap_adv_start();
-          if (err == ESP_OK) {
-            break;
-          }
-          ESP_LOGW(TAG, "Advertising start failed, rc=%d. Retrying in 100ms...", err);
-          vTaskDelay(pdMS_TO_TICKS(100));
-          retry_count++;
-        } while (retry_count < max_retries);
-        if (err != ESP_OK) {
-          ESP_LOGE(TAG, "Failed to start advertising after %d attempts. rc=%d", max_retries, err);
-        }
-      }
+      // been registered. Instead of calling esp_hid_ble_gap_adv_start()
+      // synchronously here (which races with the controller init and causes
+      // rc=4 / EALREADY in nimble_hidd), we defer the actual advertising start
+      // to update() (PollingComponent, called every 1s). We wait 3s to let
+      // the controller and WiFi scan settle completely.
+      ESP_LOGI(TAG, "HID device stack started; advertising will begin in 3s");
+      s_advertising_startup_delay = 3;  // 3 x update_interval (1000ms)
       break;
     case ESP_HIDD_CONNECT_EVENT:
       g_connected = true;
@@ -219,6 +207,13 @@ void Esp32BleKeyboard::setup() {
 void Esp32BleKeyboard::update() {
   if (state_sensor_ != nullptr) {
     state_sensor_->publish_state(g_connected);
+  }
+  if (s_advertising_startup_delay > 0) {
+    s_advertising_startup_delay--;
+    if (s_advertising_startup_delay == 0) {
+      ESP_LOGI(TAG, "Advertising startup delay elapsed; starting now");
+      esp_hid_ble_gap_adv_start();
+    }
   }
 }
 
