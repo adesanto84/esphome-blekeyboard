@@ -9,6 +9,7 @@ import esphome.config_validation as cv
 from esphome import automation
 from esphome.automation import maybe_simple_id
 from esphome.components import binary_sensor, button, number
+from esphome.components.esp32 import include_builtin_idf_component
 from esphome.const import (
     CONF_BATTERY_LEVEL,
     CONF_CODE,
@@ -72,6 +73,12 @@ async def to_code(config: dict) -> None:
 
     if not CORE.is_esp32:
         raise cv.Invalid("The component only supports ESP32.")
+
+    # The esp_hid component (which provides esp_hidd_dev_init,
+    # esp_hidd_dev_input_set, esp_hidd_dev_battery_set, etc.) is excluded
+    # from the ESPHome ESP-IDF build by default to keep the binary small.
+    # We use it for the BLE keyboard implementation, so un-exclude it.
+    include_builtin_idf_component("esp_hid")
 
     var = cg.new_Pvariable(
         config[CONF_ID],
