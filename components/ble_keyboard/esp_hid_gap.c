@@ -61,7 +61,6 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
 
     /* Flags: general discoverable + BLE-only (BR/EDR unsupported). */
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.flags_is_present = 1;
 
     /* The example uses ESP_HID_APPEARANCE_GENERIC here, but the
      * ble_keyboard component passes ESP_HID_APPEARANCE_KEYBOARD through
