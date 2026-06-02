@@ -36,6 +36,7 @@
 #include "host/ble_hs_adv.h"
 #include "nimble/ble.h"
 #include "host/ble_sm.h"
+#include "services/gap/ble_svc_gap.h"
 
 static const char *TAG = "ESP_HID_GAP";
 
