@@ -7,14 +7,16 @@
 ESPHome **external component** that emulates a BLE HID keyboard on ESP32 variants. Hybrid codebase: Python codegen (`__init__.py`, `const.py`) + C++ runtime (`*.cpp`, `*.h`, `esp_hid_gap.c`).
 
 Fork migrated from Arduino → **ESP-IDF native NimBLE** for ESP32-C3/C6/H2 compatibility.
+Active repo: https://github.com/adesanto84/esphome-blekeyboard (original: https://github.com/dmamontov/esphome-blekeyboard).
 
 ## Architecture
 
 - **Single component directory:** `components/ble_keyboard/`
+- **Codegen entry:** `__init__.py` + `const.py` — `const.py` holds action class names, domain constants, and button/number mappings. Any new action or config key must be declared there before use in `__init__.py`.
 - **Runtime entry:** `Esp32BleKeyboard` class in `ble_keyboard.cpp/.h`
 - **Vendored gap layer:** `esp_hid_gap.c/.h` — copied from ESP-IDF examples (not part of the `esp_hid` component itself). Do not delete or replace with upstream headers.
 - **Standalone support:** `CMakeLists.txt` + `Kconfig.projbuild` allow use outside ESPHome (plain PlatformIO + ESP-IDF).
-- **Examples:** `examples/esp32.yaml` (legacy ESP32), `examples/esp32c3.yaml` (C3 devkit).
+- **Examples:** `examples/esp32.yaml` (legacy ESP32), `examples/esp32c3.yaml` (C3 devkit). Both use `external_components` with `source: local` pointing to `../components` so local changes are picked up immediately.
 
 ## Hard constraints
 
@@ -107,7 +109,7 @@ docker run --rm -v "$(pwd):/config" esphome/esphome:latest \
 ## Board-specific gotchas
 
 ### ESP32-C3/C6/H2 — `ESP_ERR_NOT_SUPPORTED` on Classic BT release
-`esp_hid_gap.c:242-246` calls `esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT)`, which returns `ESP_ERR_NOT_SUPPORTED` on BLE-only chips (C3, C6, H2) because they have no Classic BT controller. That error was treated as fatal (`if (ret != ESP_OK)`) and aborted setup.
+`esp_hid_gap.c:232-233` calls `esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT)`, which returns `ESP_ERR_NOT_SUPPORTED` on BLE-only chips (C3, C6, H2) because they have no Classic BT controller. That error was treated as fatal (`if (ret != ESP_OK)`) and aborted setup.
 
 Fix: filter specifically for `ESP_ERR_NOT_SUPPORTED` and allow the flow to continue:
 ```cpp
