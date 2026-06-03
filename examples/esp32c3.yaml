@@ -1,5 +1,5 @@
 # BLE Keyboard project
-# https://github.com/dmamontov/esphome-blekeyboard
+# https://github.com/adesanto84/esphome-blekeyboard-fork
 
 ############# User configuration #############
 
@@ -27,7 +27,7 @@ substitutions:
 
 esphome:
   name: $mdns_name
-  comment: "https://github.com/dmamontov/esphome-blekeyboard"
+  comment: "https://github.com/adesanto84/esphome-blekeyboard-fork"
 
 esp32:
   board: $board
@@ -70,7 +70,7 @@ external_components:
   - source:
       type: local
       path: ../components
-#   - source: github://dmamontov/esphome-blekeyboard@dev
+#   - source: github://adesanto84/esphome-blekeyboard-fork@dev
 
 ble_keyboard:
   id: my_ble_keyboard
