@@ -3,7 +3,7 @@ name: Feature request
 about: Suggest an idea for this component
 title: "[FEATURE REQUEST]"
 labels: enhancement
-assignees: dmamontov
+assignees: adesanto84
 
 ---
 
