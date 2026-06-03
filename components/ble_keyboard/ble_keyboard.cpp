@@ -314,17 +314,40 @@ void Esp32BleKeyboard::press(std::string message) {
     ESP_LOGW(TAG, "Not connected, cannot print");
     return;
   }
-  for (size_t i = 0; i < message.length(); ++i) {
-    HidKey hk = ascii_to_hid(message[i]);
-    if (hk.key == 0) {
-      ESP_LOGW(TAG, "Unsupported character: 0x%02X", (unsigned char)message[i]);
-      continue;
-    }
-    send_keyboard_report(hk.modifier, hk.key);
-    delay(default_delay_);
-    send_keyboard_report(0, 0);  // release
-    delay(default_delay_);
+  if (pending_text_.length() > 0) {
+    ESP_LOGW(TAG, "Already printing; queueing new message");
+    pending_text_ = message;
+    text_index_ = 0;
+    return;
   }
+  pending_text_ = message;
+  text_index_ = 0;
+  process_next_print_char();
+}
+
+void Esp32BleKeyboard::process_next_print_char() {
+  if (pending_text_.empty() || text_index_ >= pending_text_.length()) {
+    pending_text_.clear();
+    text_index_ = 0;
+    return;
+  }
+
+  HidKey hk = ascii_to_hid(pending_text_[text_index_]);
+  text_index_++;
+
+  if (hk.key == 0) {
+    ESP_LOGW(TAG, "Unsupported character: 0x%02X", (unsigned char)pending_text_[text_index_ - 1]);
+    set_timeout("print_next", 1, [this]() { this->process_next_print_char(); });
+    return;
+  }
+
+  send_keyboard_report(hk.modifier, hk.key);
+  set_timeout("print_release", default_delay_, [this]() {
+    this->send_keyboard_report(0, 0);
+    this->set_timeout("print_next", this->default_delay_, [this]() {
+      this->process_next_print_char();
+    });
+  });
 }
 
 /* --- Modifier dispatch helper --- */

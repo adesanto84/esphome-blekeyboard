@@ -6,6 +6,7 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include <string>
 #include <vector>
+#include <queue>
 
 namespace esphome {
 namespace ble_keyboard {
@@ -52,6 +53,7 @@ class Esp32BleKeyboard : public PollingComponent {
   void send_keyboard_report(uint8_t modifiers, uint8_t key1 = 0, uint8_t key2 = 0, uint8_t key3 = 0,
                             uint8_t key4 = 0, uint8_t key5 = 0, uint8_t key6 = 0);
   void send_media_report(uint8_t byte0, uint8_t byte1);
+  void process_next_print_char();
 
   std::string name_;
   std::string manufacturer_id_;
@@ -59,6 +61,8 @@ class Esp32BleKeyboard : public PollingComponent {
   bool reconnect_{true};
   uint32_t default_delay_{100};
   uint32_t release_delay_{50};
+  std::string pending_text_;
+  size_t text_index_{0};
 };
 
 }  // namespace ble_keyboard
