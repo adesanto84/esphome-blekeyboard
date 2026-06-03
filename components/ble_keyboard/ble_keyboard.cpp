@@ -57,6 +57,7 @@ static const uint8_t kHidReportMap[] = {
 
 /* --- Module state --- */
 static bool g_connected = false;
+static bool g_reconnect = true;
 static uint8_t keyboard_output_report_[1] = {0};
 static char g_device_name[32] = "BLE Keyboard";
 static char g_manufacturer_id[32] = "ESPHome";
@@ -101,9 +102,11 @@ static void hidd_event_handler(void *handler_args, esp_event_base_t base, int32_
     case ESP_HIDD_DISCONNECT_EVENT:
       g_connected = false;
       ESP_LOGI(TAG, "HID device disconnected; reason=%d", param->disconnect.reason);
-      // Re-start advertising so a fresh connection can be made without a power cycle.
-      // The host is by now fully up, so this call is safe.
-      esp_hid_ble_gap_adv_start();
+      if (g_reconnect) {
+        // Re-start advertising so a fresh connection can be made without a power cycle.
+        // The host is by now fully up, so this call is safe.
+        esp_hid_ble_gap_adv_start();
+      }
       break;
     case ESP_HIDD_OUTPUT_EVENT:
       // Host wrote the LED state to the Output Report (Caps/Num/Scroll Lock).
@@ -189,6 +192,8 @@ void Esp32BleKeyboard::setup() {
 
   // Step 5: initial battery level, until Home Assistant overrides it.
   esp_hidd_dev_battery_set(s_hid_dev, battery_level_);
+
+  g_reconnect = reconnect_;
 
   // Step 6: enable NimBLE's bond store backed by NVS. Without this, a reboot
   // loses the LTK and the next connect hits the AUTHREQ loop.
@@ -322,7 +327,7 @@ void Esp32BleKeyboard::press(std::string message) {
     return;
   }
   if (pending_text_.length() > 0) {
-    ESP_LOGW(TAG, "Already printing; queueing new message");
+    ESP_LOGW(TAG, "Already printing; replacing with new message");
     pending_text_ = message;
     text_index_ = 0;
     return;
@@ -449,9 +454,7 @@ void Esp32BleKeyboard::release() {
 }
 
 void Esp32BleKeyboard::start() {
-  if (reconnect_) {
-    esp_hid_ble_gap_adv_start();
-  }
+  esp_hid_ble_gap_adv_start();
 }
 
 void Esp32BleKeyboard::stop() {
