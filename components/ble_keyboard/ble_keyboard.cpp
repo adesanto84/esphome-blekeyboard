@@ -9,7 +9,8 @@
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
-#include "host/ble_store.h"      // ble_store_config_init (declared via host tree)
+#include "host/ble_store.h"      // ble_store_config_init
+#include "services/gap/ble_svc_gap.h"  // ble_svc_gap_device_name_set (declared via host tree)
 #include "esp_nimble_mem.h"      // nimble_platform_mem_* when BLE_STATIC_TO_DYNAMIC is on
 
 /* esp_hid device library: provides esp_hidd_dev_init, esp_hidd_dev_input_set,
@@ -179,6 +180,12 @@ void Esp32BleKeyboard::setup() {
     ESP_LOGE(TAG, "esp_hidd_dev_init failed: %d", err);
     return;
   }
+
+  // Set the GAP Device Name characteristic (0x2A00) AFTER esp_hidd_dev_init()
+  // because esp_hidd_dev_init() internally calls ble_svc_gap_init() which
+  // resets the name to the NimBLE default ("nimble"). We must override it
+  // here so Windows/Android read the user-configured name.
+  ble_svc_gap_device_name_set(g_device_name);
 
   // Step 5: initial battery level, until Home Assistant overrides it.
   esp_hidd_dev_battery_set(s_hid_dev, battery_level_);

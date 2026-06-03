@@ -100,12 +100,6 @@ esp_err_t esp_hid_ble_gap_adv_init(uint16_t appearance, const char *device_name)
     ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ID | BLE_SM_PAIR_KEY_DIST_ENC;
     ble_hs_cfg.sm_their_key_dist |= BLE_SM_PAIR_KEY_DIST_ID | BLE_SM_PAIR_KEY_DIST_ENC;
 
-    /* Also set the GAP Device Name characteristic (0x2A00) so that the
-     * operating system reads the user-configured name after pairing, not the
-     * NimBLE default ("nimble"). Windows uses this characteristic for the
-     * display name in "Devices and Printers". */
-    ble_svc_gap_device_name_set(device_name);
-
     return ESP_OK;
 }
 
