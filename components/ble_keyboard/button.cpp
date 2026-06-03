@@ -9,14 +9,13 @@ namespace ble_keyboard {
 static const char *const TAG = "ble_keyboard";
 
 void Esp32BleKeyboardButton::press_action() {
-  if (text_value_.length() > 0) {
+  if (has_text_) {
     parent_->press(text_value_);
-  } else if (first_value_ != -1 && second_value_ != -1) {
-    MediaKeyReport mediaKey = {(uint8_t) first_value_, (uint8_t) second_value_};
-
+  } else if (has_second_value_) {
+    MediaKeyReport mediaKey = {first_value_, second_value_};
     parent_->press(mediaKey);
-  } else if (first_value_ != -1) {
-    parent_->press((uint8_t) first_value_);
+  } else if (has_first_value_) {
+    parent_->press(first_value_);
   } else {
     parent_->release();
   }

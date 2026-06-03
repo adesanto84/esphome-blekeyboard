@@ -14,7 +14,7 @@ substitutions:
 
   # OTA and API
   ota_password: "esphome"
-  api_password: "esphome"
+  api_key: "0Xj+DK819d/Azqyt6y1Wi7WVJeSuXEkxiBajFfokieQ="  # CHANGE ME: generate your own API encryption key (or use !secret)
 
   # Software configuration
   input_text_entity_id: "input_text.blekeyboard_new_message" # A string object for entering arbitrary text.
@@ -27,16 +27,30 @@ substitutions:
 
 esphome:
   name: $mdns_name
-  platform: ESP32
-  board: $board
   comment: "https://github.com/dmamontov/esphome-blekeyboard"
+
+esp32:
+  board: $board
+  variant: esp32
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      CONFIG_BT_ENABLED: "y"
+      CONFIG_BT_BLE_ENABLED: "y"
+      CONFIG_BT_NIMBLE_ENABLED: "y"
+      # Enable NimBLE's built-in HID service. Required for esp_hid device
+      # backend on NimBLE.
+      CONFIG_BT_NIMBLE_HID_SERVICE: "y"
+      # esp_hid component
+      CONFIG_BT_HID_DEVICE_ENABLED: "y"
 
 # Enable logging
 logger:
 
 # Enable OTA
 ota:
-  password: $ota_password
+  - platform: esphome
+    password: $ota_password
 
 # Enable WiFi
 wifi:
@@ -46,7 +60,8 @@ wifi:
 
 # Enable Home Assistant API
 api:
-  password: $api_password
+  encryption:
+    key: $api_key
 
 ########### End base configuration ###########
 
