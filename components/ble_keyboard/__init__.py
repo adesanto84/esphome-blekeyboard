@@ -74,6 +74,8 @@ async def to_code(config: dict) -> None:
     if not CORE.is_esp32:
         raise cv.Invalid("The component only supports ESP32.")
 
+    if CORE.using_arduino:
+        raise cv.Invalid("The component only supports the ESP-IDF framework.")
     # The esp_hid component (which provides esp_hidd_dev_init,
     # esp_hidd_dev_input_set, esp_hidd_dev_battery_set, etc.) is excluded
     # from the ESPHome ESP-IDF build by default to keep the binary small.
