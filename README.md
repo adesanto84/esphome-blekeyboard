@@ -31,8 +31,7 @@ external_components:
   - source:
       type: git
       url: https://github.com/adesanto84/esphome-blekeyboard
-      ref: esp-idf-migration
-
+      ref: main
 ble_keyboard:
   name: "MyBleKeyboard"
   manufacturer_id: "ESPHome"
