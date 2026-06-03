@@ -50,9 +50,8 @@ esp32:
     type: esp-idf
     sdkconfig_options:
       CONFIG_BT_ENABLED: y
+      CONFIG_BT_BLE_ENABLED: y
       CONFIG_BT_NIMBLE_ENABLED: y
-      CONFIG_BT_NIMBLE_ROLE_BROADCASTER: y
-      CONFIG_BT_NIMBLE_ROLE_PERIPHERAL: y
 ```
 
 ## Automation Example
