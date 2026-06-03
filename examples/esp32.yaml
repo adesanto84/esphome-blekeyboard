@@ -14,7 +14,7 @@ substitutions:
 
   # OTA and API
   ota_password: "esphome"
-  api_key: "0Xj+DK819d/Azqyt6y1Wi7WVJeSuXEkxiBajFfokieQ="
+  api_key: "0Xj+DK819d/Azqyt6y1Wi7WVJeSuXEkxiBajFfokieQ="  # CHANGE ME: generate your own API encryption key (or use !secret)
 
   # Software configuration
   input_text_entity_id: "input_text.blekeyboard_new_message" # A string object for entering arbitrary text.
