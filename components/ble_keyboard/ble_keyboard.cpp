@@ -3,6 +3,7 @@
 #include "ble_keyboard.h"
 #include "esphome/core/log.h"
 #include <cctype>
+#include <cstdlib>
 #include <vector>
 
 /* NimBLE host task helpers */
@@ -413,14 +414,14 @@ void Esp32BleKeyboard::press_combination(const std::vector<std::string> &keys, u
     uint8_t key_val = 0;
     bool is_str_key = true;
 
-    if (key_str.length() == 1) {
+    if (key_str.length() == 1 && !std::isdigit(static_cast<unsigned char>(key_str[0]))) {
       HidKey hk = ascii_to_hid(key_str[0]);
       if (hk.key != 0) {
         key_val = hk.key;
         modifiers |= hk.modifier;
       }
     } else if (!key_str.empty() && std::isdigit(static_cast<unsigned char>(key_str[0]))) {
-      key_val = static_cast<uint8_t>(atoi(key_str.c_str()));
+      key_val = static_cast<uint8_t>(strtol(key_str.c_str(), nullptr, 0));
       is_str_key = false;
     }
 
