@@ -153,7 +153,11 @@ void Esp32BleKeyboard::setup() {
   // Override the security parameters that esp_hid_ble_gap_adv_init set.
   // The example uses sm_io_cap = DISP_ONLY + sm_sc = 1, which Windows
   // rejects with status=7 (BLE_SM_ERR_AUTHREQ) on a no-IO keyboard. Switch
-  // to LE Legacy Just Works so Windows + NimBLE agree.
+  // Switch to LE Just Works so Windows + NimBLE agree.
+  // sm_sc=1 selects LE Secure Connections (ECDHE P-256), which is what the
+  // official esp_hid_device example uses and what Windows expects for HID
+  // bond reconnect after reboot.  sm_mitm=0 + NO_IO keeps pairing fully
+  // automatic ("Just Works"); there is no passkey prompt.
   // sm_our_key_dist / sm_their_key_dist MUST include BLE_SM_PAIR_KEY_DIST_ID
   // (Identity Address) so both sides store a complete bond. Without ID,
   // Windows reconnects after reboot but drops immediately with reason=531
@@ -161,7 +165,7 @@ void Esp32BleKeyboard::setup() {
   ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
   ble_hs_cfg.sm_bonding = 1;
   ble_hs_cfg.sm_mitm = 0;
-  ble_hs_cfg.sm_sc = 0;
+  ble_hs_cfg.sm_sc = 1;
   ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
   ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID;
 
