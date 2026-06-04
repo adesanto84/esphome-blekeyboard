@@ -100,12 +100,6 @@ async def to_code(config: dict) -> None:
     add_idf_sdkconfig_option("CONFIG_BT_BLE_ENABLED", True)
     add_idf_sdkconfig_option("CONFIG_BT_NIMBLE_ENABLED", True)
     add_idf_sdkconfig_option("CONFIG_BT_NIMBLE_HID_SERVICE", True)
-    # NVS_PERSIST is mandatory: without it ble_store_config_init() keeps bonds
-    # in RAM only; they are lost on reboot and Windows reconnect fails with
-    # reason=531 (BLE_ERR_REM_USER_CONN_TERM).
-    add_idf_sdkconfig_option("CONFIG_BT_NIMBLE_NVS_PERSIST", True)
-    # SM_SC must be compiled in (runtime sm_sc=0 still selects Legacy).
-    add_idf_sdkconfig_option("CONFIG_BT_NIMBLE_SM_SC", True)
 
     var = cg.new_Pvariable(
         config[CONF_ID],

@@ -43,6 +43,14 @@ esp32:
       CONFIG_BT_NIMBLE_HID_SERVICE: "y"
       # esp_hid component
       CONFIG_BT_HID_DEVICE_ENABLED: "y"
+      # Persist NimBLE bonds in NVS so they survive reboot.
+      # Without this, Windows reconnect fails with reason=531 after
+      # device reboot or firmware update.
+      CONFIG_BT_NIMBLE_NVS_PERSIST: "y"
+      # Enable Secure Connections compile-time support. Runtime sm_sc=0
+      # still selects Legacy pairing (for Windows Just Works), but SC
+      # must be compiled in for the SM stack to function correctly.
+      CONFIG_BT_NIMBLE_SM_SC: "y"
 
 # Enable logging
 logger:
